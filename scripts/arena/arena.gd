@@ -148,17 +148,28 @@ func rebuild() -> void:
 	var segments: Array[PackedVector2Array] = []
 	_march(top, segments)
 
+	# Chain the boundary into closed loops: the largest is the island outline, the rest are holes.
+	var loops := _chain_loops(segments)
+	var outer_i := 0
+	for i in loops.size():
+		if absf(_loop_area(loops[i])) > absf(_loop_area(loops[outer_i])):
+			outer_i = i
+
 	var walls := PackedVector3Array()
 	var wall_normals := PackedVector3Array()
-	_build_walls(segments, walls, wall_normals)
-	var under := _build_underside()
+	for i in loops.size():
+		if i != outer_i:
+			_build_walls(loops[i], walls, wall_normals)
 
 	var mesh := ArrayMesh.new()
 	_add_surface(mesh, top, _const_normals(top.size(), Vector3.UP))
 	_add_surface(mesh, walls, wall_normals)
-	_add_surface(mesh, under, _flat_normals(under))
+	var cliff_collision := PackedVector3Array()
+	if not loops.is_empty():
+		_add_outer_shell(mesh, loops[outer_i], cliff_collision)
 	for s in mesh.get_surface_count():
 		mesh.surface_set_material(s, terrain_material)
+	walls.append_array(cliff_collision)
 
 	var mi := MeshInstance3D.new()
 	mi.name = "Terrain"
@@ -284,6 +295,54 @@ func _march(top: PackedVector3Array, segments: Array[PackedVector2Array]) -> voi
 						segments.append(PackedVector2Array([poly[k], poly[k2]]))
 
 
+## Links marching-squares segments head-to-tail into closed loops of points.
+func _chain_loops(segments: Array[PackedVector2Array]) -> Array[PackedVector2Array]:
+	var buckets := {}
+	for i in segments.size():
+		var key := Vector2i((segments[i][0] * 2000.0).round())
+		if not buckets.has(key):
+			buckets[key] = []
+		buckets[key].append(i)
+	var used := PackedByteArray()
+	used.resize(segments.size())
+	var loops: Array[PackedVector2Array] = []
+	for start in segments.size():
+		if used[start]:
+			continue
+		var loop := PackedVector2Array()
+		var cur := start
+		while cur >= 0 and not used[cur]:
+			used[cur] = 1
+			loop.append(segments[cur][0])
+			cur = _find_next(segments, buckets, used, segments[cur][1])
+		if loop.size() >= 3:
+			loops.append(loop)
+	return loops
+
+
+func _find_next(segments: Array[PackedVector2Array], buckets: Dictionary, used: PackedByteArray, p: Vector2) -> int:
+	var key := Vector2i((p * 2000.0).round())
+	var best := -1
+	var best_d := 1e-3
+	for dx in [-1, 0, 1]:
+		for dy in [-1, 0, 1]:
+			for i in buckets.get(key + Vector2i(dx, dy), []):
+				var d: float = segments[i][0].distance_to(p)
+				if not used[i] and d < best_d:
+					best_d = d
+					best = i
+	return best
+
+
+static func _loop_area(loop: PackedVector2Array) -> float:
+	var a := 0.0
+	for i in loop.size():
+		var p := loop[i]
+		var q := loop[(i + 1) % loop.size()]
+		a += p.x * q.y - q.x * p.y
+	return a * 0.5
+
+
 ## Wall profile rows: (depth below the top as a fraction of thickness, inward inset).
 func _wall_rows(is_outer: bool) -> Array[Vector2]:
 	var t := config.thickness
@@ -292,11 +351,8 @@ func _wall_rows(is_outer: bool) -> Array[Vector2]:
 	for k in range(1, n + 1):
 		var f := float(k) / n
 		var y := lerpf(0.22, t, f)
-		var inset := 0.1 + (0.35 * f * f if is_outer else 0.03 * f)
+		var inset := 0.1 + (0.12 * f * f if is_outer else 0.03 * f)
 		rows.append(Vector2(y, inset))
-	if is_outer:
-		# Tuck the cliff foot inside the underside so no gap can reveal the hollow interior.
-		rows.append(Vector2(t + 0.7, 1.1))
 	return rows
 
 
@@ -315,13 +371,14 @@ func _wall_point(q: Vector2, row: Vector2, row_index: int, is_outer: bool) -> Ve
 	return Vector3(flat.x, y, flat.y)
 
 
-func _build_walls(segments: Array[PackedVector2Array], out: PackedVector3Array, normals: PackedVector3Array) -> void:
-	for seg in segments:
-		var a := seg[0]
-		var b := seg[1]
+## Hole walls: layered earth rows hanging from a hole's outline loop.
+func _build_walls(loop: PackedVector2Array, out: PackedVector3Array, normals: PackedVector3Array) -> void:
+	var is_outer := false
+	var rows := _wall_rows(is_outer)
+	for i in loop.size():
+		var a := loop[i]
+		var b := loop[(i + 1) % loop.size()]
 		var mid := (a + b) * 0.5
-		var is_outer := island_sdf(mid) > -0.25
-		var rows := _wall_rows(is_outer)
 		var ga := ground_gradient(a)
 		var gb := ground_gradient(b)
 		var gm := ground_gradient(mid)
@@ -351,45 +408,87 @@ static func _quad(out: PackedVector3Array, normals: PackedVector3Array, a: Vecto
 		normals.append_array([na, nc, nb, na, nd, nc])
 
 
-func _build_underside() -> PackedVector3Array:
-	var out := PackedVector3Array()
-	var steps := 72
-	var rings := 6
+## The island's outside as ONE watertight surface: it starts exactly on the grass outline
+## (the same points as the top surface's boundary), drops down the layered cliff rows and
+## continues, without any seam, into the rocky underside that tapers in gentle lobes to a
+## single apex. Smooth normals make cliff and underside shade as a single mass.
+## The cliff part is also appended to `collision` (characters falling off the edge).
+func _add_outer_shell(mesh: ArrayMesh, outline: PackedVector2Array, collision: PackedVector3Array) -> void:
+	var n := outline.size()
 	var t0 := config.thickness
 	var depth := config.underside_depth
-	var grid: Array[PackedVector3Array] = []
-	for k in rings + 1:
-		var f := float(k) / rings
+	var centre := Vector2.ZERO
+	for p in outline:
+		centre += p
+	centre /= n
+	var apex := Vector3(centre.x + 0.3, -t0 - depth, centre.y + 0.4)
+
+	var cliff_rows := _wall_rows(true)
+	var under_rings := 12
+	var rings: Array[PackedVector3Array] = []
+	for r in cliff_rows.size():
 		var ring := PackedVector3Array()
-		for s in steps:
-			var a := TAU * s / steps
-			var dir := Vector2(cos(a), sin(a))
-			# Find the outer edge radius along this direction (binary search on island_sdf).
-			var lo := 0.0
-			var hi := config.radius.x + 3.0
-			for _i in 18:
-				var mid := (lo + hi) * 0.5
-				if island_sdf(dir * mid) < 0.0:
-					lo = mid
-				else:
-					hi = mid
-			var n := _vnoise(Vector3(cos(a) * 2.2, f * 2.0, sin(a) * 2.2))
-			var radius := (lo - 0.62) * pow(maxf(1.0 - f * f, 0.0), 0.75) * (1.0 + 0.12 * n * f)
-			var y := -t0 + 0.3 - (depth + 0.3) * pow(f, 0.85) * (1.0 + 0.35 * _vnoise(Vector3(cos(a) * 3.0, 4.0, sin(a) * 3.0)) * f)
-			ring.append(Vector3(dir.x * radius, y, dir.y * radius))
-		grid.append(ring)
-	for k in rings:
-		for s in steps:
-			var s2 := (s + 1) % steps
-			var a := grid[k][s]
-			var b := grid[k][s2]
-			var c := grid[k + 1][s2]
-			var d := grid[k + 1][s]
-			var outward := Vector3((a + b).x, 0.0, (a + b).z).normalized() + Vector3.DOWN * 0.4
-			_tri(out, a, b, c, outward)
-			if k < rings - 1:
-				_tri(out, a, c, d, outward)
-	return out
+		for p in outline:
+			ring.append(_wall_point(p, cliff_rows[r], r, true))
+		rings.append(ring)
+	var foot := rings[rings.size() - 1]
+	for k in range(1, under_rings):
+		var f := float(k) / under_rings
+		var ring := PackedVector3Array()
+		for i in n:
+			var b := foot[i]
+			var rel := Vector2(b.x - apex.x, b.z - apex.z)
+			var a := atan2(rel.y, rel.x)
+			# Low-frequency lobes, continuous around the ring and down the rings.
+			var lobe := _vnoise(Vector3(cos(a) * 1.6, f * 1.8, sin(a) * 1.6))
+			var lump := _vnoise(Vector3(cos(a) * 4.0 + 7.0, f * 5.0, sin(a) * 4.0))
+			# Profile: continues the cliff almost vertically, then a rounded taper.
+			var shape := pow(maxf(1.0 - pow(f, 1.6), 0.0), 0.65)
+			var xz := Vector2(apex.x, apex.z) + rel * shape * (1.0 + (0.14 * lobe + 0.05 * lump) * f)
+			var y := b.y - depth * f * (1.0 + 0.12 * lobe * f * (1.0 - f))
+			ring.append(Vector3(xz.x, y, xz.y))
+		rings.append(ring)
+
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for ring in rings:
+		for v in ring:
+			st.add_vertex(v)
+	st.add_vertex(apex)
+	var apex_i := rings.size() * n
+	# Outline orientation decides the winding; pick it from the first quad so faces point out.
+	var a0 := rings[0][0]
+	var b0 := rings[0][1]
+	var c0 := rings[1][1]
+	var out_dir := Vector3(a0.x - apex.x, 0.0, a0.z - apex.z)
+	# Triangles are emitted as (a, c, b); flip when that order would face inward.
+	var flip := (b0 - a0).cross(c0 - a0).dot(out_dir) < 0.0
+	for k in rings.size():
+		for i in n:
+			var i2 := (i + 1) % n
+			var a := k * n + i
+			var b := k * n + i2
+			if k == rings.size() - 1:
+				_tri_indexed(st, a, b, apex_i, flip)
+			else:
+				_tri_indexed(st, a, b, b + n, flip)
+				_tri_indexed(st, a, b + n, a + n, flip)
+				if k < cliff_rows.size() - 1:
+					for v in [rings[k][i], rings[k][i2], rings[k + 1][i2], rings[k][i], rings[k + 1][i2], rings[k + 1][i]]:
+						collision.append(v)
+	st.generate_normals()
+	st.commit(mesh)
+
+
+## Adds triangle (a, b, c) as Godot front-facing (clockwise) unless `flip` reverses it.
+static func _tri_indexed(st: SurfaceTool, a: int, b: int, c: int, flip: bool) -> void:
+	st.add_index(a)
+	if flip:
+		st.add_index(b)
+		st.add_index(c)
+	else:
+		st.add_index(c)
+		st.add_index(b)
 
 
 func _bake_sdf_texture() -> void:

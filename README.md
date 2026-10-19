@@ -31,8 +31,9 @@ short delay.
 ## What's in the box
 
 - **Arena:** a procedural floating island with six real holes. The holes are gaps in both the
-  mesh and the collision. Hole walls and cliffs show layered earth, the island has a rocky
-  underside, and the grass grows in dense, wind-animated clumps. There are flowers, trees with
+  mesh and the collision. Hole walls, cliffs and the closed rocky underside share one
+  depth-based colouring, so soil fades through dark earth and brown rock into stone with
+  dithered borders. The grass grows in dense, wind-animated clumps. There are flowers, trees with
   swaying leaf canopies, rocks, stumps and mushrooms, toon-shaded clouds drift around the
   island, and cloud shadows move across the ground.
 - **Characters** modeled in Blender: *Pip* (red fox-eared hood, yellow scarf) and *Mog*
@@ -107,7 +108,7 @@ Performance: roughly 0.35 ms GPU per frame on an RX 9060 XT, and about 1,800 FPS
 
 - `scripts/arena/arena.gd` (`@tool`): the island is a signed distance field — an organic
   ellipse minus a set of holes. Marching squares turns it into the grass top with real gaps.
-  Walls get jittered earth rows, then the code builds the underside, separate *floor* and
+  Hole walls get jittered earth rows; the outside (cliff plus rocky underside) is one watertight, smooth-shaded shell swept from the exact grass outline down to a single apex. The code then builds separate *floor* and
   *wall* collision bodies, and an SDF texture shared with the shaders. `ground_sdf()` is also
   the AI's map.
 - `scripts/character/character.gd`: a `CharacterBody3D` with a small state machine (spawning,
