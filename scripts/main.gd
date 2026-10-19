@@ -1,10 +1,15 @@
 extends Node
 ## Game flow: spawns the two fighters, runs rounds (intro -> fight -> winner -> reset),
 ## tracks wins, and handles the 1P / 2P toggle and debug keys.
+##
+## Human players move/jump through a PlayerBrain and attack with rhythmic incantations:
+## PlayerInput (timestamped A/B/X/Y) -> SpellCaster (rhythm engine) -> SpellEffects.
+## The CPU opponent keeps the original melee push.
 
 const CHARACTER_SCENE := preload("res://scenes/character.tscn")
 const PIP_MODEL := preload("res://assets/models/pip.glb")
 const MOG_MODEL := preload("res://assets/models/mog.glb")
+const SPELLBOOK := preload("res://assets/spells/spellbook.tres")
 
 enum Phase { INTRO, FIGHT, ROUND_OVER }
 
@@ -18,6 +23,7 @@ enum Phase { INTRO, FIGHT, ROUND_OVER }
 @onready var fx: FxSprites = $PixelView/GameViewport/World/Fx
 @onready var hud: Hud = $PixelView/GameViewport/Hud
 @onready var post: MeshInstance3D = $PixelView/GameViewport/World/Camera/PostProcess
+@onready var spells: SpellEffects = $PixelView/GameViewport/World/Spells
 
 var two_player := false
 var scores := [0, 0]
@@ -26,6 +32,9 @@ var phase := Phase.INTRO
 var phase_time := 0.0
 var _landed := 0
 var _round_decided := false
+## Per fighter: its PlayerInput and SpellCaster when human-controlled, else null.
+var inputs: Array[PlayerInput] = [null, null]
+var casters: Array[SpellCaster] = [null, null]
 
 
 func _ready() -> void:
@@ -34,6 +43,7 @@ func _ready() -> void:
 	fighters[0].opponent = fighters[1]
 	fighters[1].opponent = fighters[0]
 	hud.set_names("Pip", 4, "Mog", 11)
+	spells.setup(arena, fx, camera, fighters)
 	_apply_mode()
 	start_round()
 
@@ -55,14 +65,48 @@ func _make_fighter(display: String, model: PackedScene, color: int) -> ArenaChar
 
 
 func _apply_mode() -> void:
-	if two_player:
-		fighters[0].brain = PlayerBrain.new(["p1_"], camera)
-		fighters[1].brain = PlayerBrain.new(["p2_"], camera)
-	else:
-		fighters[0].brain = PlayerBrain.new(["p1_", "p2_"], camera)
-		fighters[1].brain = AIBrain.new(arena, randi())
+	for i in fighters.size():
+		var human := i == 0 or two_player
+		_set_human(i, human)
+		if human:
+			var prefixes: Array[String] = []
+			if not two_player:
+				prefixes.append_array(["p1_", "p2_"]) # a single player may use either side / pad
+			else:
+				prefixes.append("p%d_" % (i + 1))
+			inputs[i].prefixes = prefixes
+			fighters[i].brain = PlayerBrain.new(inputs[i])
+		else:
+			fighters[i].brain = AIBrain.new(arena, randi())
 	hud.set_mode(two_player)
 	hud.set_score(scores[0], scores[1])
+	hud.set_rhythm_panels(casters)
+
+
+## Gives fighter `i` (or removes) a PlayerInput + SpellCaster pair.
+func _set_human(i: int, human: bool) -> void:
+	if human and inputs[i] == null:
+		var input := PlayerInput.new()
+		input.name = "Input%d" % (i + 1)
+		input.camera = camera
+		add_child(input)
+		var caster := SpellCaster.new()
+		caster.name = "SpellCaster"
+		caster.book = SPELLBOOK
+		caster.character = fighters[i]
+		caster.effects = spells
+		caster.fx = fx
+		caster.metronome_pitch = 1.0 if i == 0 else 1.26
+		fighters[i].add_child(caster)
+		input.syllable_pressed.connect(caster.syllable)
+		input.syllable_released.connect(caster.syllable_released)
+		inputs[i] = input
+		casters[i] = caster
+	elif not human and inputs[i] != null:
+		inputs[i].queue_free()
+		casters[i].queue_free()
+		inputs[i] = null
+		casters[i] = null
 
 
 func start_round() -> void:
@@ -70,6 +114,11 @@ func start_round() -> void:
 	phase_time = 0.0
 	_landed = 0
 	_round_decided = false
+	arena.reset_holes()
+	spells.clear()
+	for c in casters:
+		if c:
+			c.cancel()
 	var sp := arena.config.spawn_points
 	for i in fighters.size():
 		var p := sp[i % sp.size()]
@@ -117,14 +166,13 @@ func _physics_process(delta: float) -> void:
 	match phase:
 		Phase.INTRO:
 			if _landed >= fighters.size() and phase_time > 1.0:
-				if hud._message.text != "PUSH!":
-					hud.show_message("PUSH!", hud.palette_color(6, 3))
-					for f in fighters:
-						f.set_frozen(false)
-					phase = Phase.FIGHT
-					phase_time = 0.0
+				hud.show_message("FIGHT!", hud.palette_color(6, 3))
+				for f in fighters:
+					f.set_frozen(false)
+				phase = Phase.FIGHT
+				phase_time = 0.0
 		Phase.FIGHT:
-			if phase_time > 0.7 and hud._message.text == "PUSH!":
+			if phase_time > 0.7 and hud._message.text == "FIGHT!":
 				hud.hide_message()
 		Phase.ROUND_OVER:
 			if phase_time > round_over_time:

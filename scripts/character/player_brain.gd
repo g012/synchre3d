@@ -1,40 +1,31 @@
 class_name PlayerBrain
 extends CharacterBrain
-## Keyboard control. Movement is relative to the screen (camera), not to the character.
-## A push pressed slightly early (during cooldown) is buffered so mashing feels fair.
+## Human control: movement and jump come from a PlayerInput. Attacks are spells, fed to the
+## character's SpellCaster from the same PlayerInput's timestamped syllable events, so they
+## never interfere with moving or jumping.
 
-const PUSH_BUFFER := 0.15
+const JUMP_BUFFER := 0.12
 
-## Action name prefixes this player listens to, e.g. ["p1_"] or ["p1_", "p2_"].
-var prefixes: Array[String] = ["p1_"]
-var camera: PixelCamera
-
-var _push_buffer := 0.0
+var input: PlayerInput
+var _jump_buffer := 0.0
 
 
-func _init(action_prefixes: Array[String], cam: PixelCamera) -> void:
-	prefixes = action_prefixes
-	camera = cam
+func _init(player_input: PlayerInput) -> void:
+	input = player_input
 
 
 func update(_character: ArenaCharacter, delta: float) -> void:
-	_push_buffer = maxf(_push_buffer - delta, 0.0)
-	for p in prefixes:
-		if Input.is_action_just_pressed(p + "push"):
-			_push_buffer = PUSH_BUFFER
+	_jump_buffer = maxf(_jump_buffer - delta, 0.0)
+	if input.jump_just_pressed():
+		_jump_buffer = JUMP_BUFFER
 
 
 func get_move(_character: ArenaCharacter) -> Vector3:
-	var v := Vector2.ZERO
-	for p in prefixes:
-		v += Input.get_vector(p + "left", p + "right", p + "up", p + "down")
-	v = v.limit_length(1.0)
-	var axes := camera.ground_axes()
-	return axes[0] * v.x + axes[1] * v.y
+	return input.move_vector()
 
 
-func wants_push(_character: ArenaCharacter) -> bool:
-	if _push_buffer > 0.0:
-		_push_buffer = 0.0
+func wants_jump(_character: ArenaCharacter) -> bool:
+	if _jump_buffer > 0.0:
+		_jump_buffer = 0.0
 		return true
 	return false

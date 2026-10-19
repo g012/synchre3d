@@ -12,6 +12,7 @@ signal pushed(attacker: ArenaCharacter, target: ArenaCharacter, hit: bool)
 signal fell(character: ArenaCharacter)
 signal eliminated(character: ArenaCharacter)
 signal landed(character: ArenaCharacter)
+signal jumped(character: ArenaCharacter)
 
 enum State { SPAWNING, ACTIVE, PUSHING, HITSTUN, FALLING, OUT, VICTORY, FROZEN }
 
@@ -28,6 +29,10 @@ enum State { SPAWNING, ACTIVE, PUSHING, HITSTUN, FALLING, OUT, VICTORY, FROZEN }
 @export var deceleration := 30.0
 @export var turn_speed := 18.0
 @export var gravity := 30.0
+## Initial upward speed of a jump (with gravity 30: ~0.9 high, ~0.5 s in the air).
+@export var jump_velocity := 7.4
+## Fraction of ground acceleration available in the air.
+@export var air_control := 0.7
 
 @export_group("Push")
 ## Reach measured from this character's centre to the target's centre.
@@ -80,6 +85,12 @@ var _lean := 0.0
 var _hit_lean := 0.0
 var _dust_timer := 0.0
 var _spin := 0.0
+var _jump_buffer := 0.0
+var _was_airborne := false
+## Incantation visuals, driven by the SpellCaster: 0 = idle, 1 = last syllable reached.
+var cast_level := 0.0
+var _cast_pose := 0.0
+var _cast_bob := 0.0
 
 const FLOOR_MASK := Arena.LAYER_FLOOR
 const GROUND_MASK := Arena.LAYER_FLOOR | Arena.LAYER_OBSTACLES
@@ -131,6 +142,8 @@ func spawn(at: Vector3, face: Vector3) -> void:
 	_flash = 0.0
 	_spin = 0.0
 	_hit_lean = 0.0
+	_jump_buffer = 0.0
+	cast_level = 0.0
 	_set_state(State.SPAWNING)
 	_visual.visible = true
 	reset_physics_interpolation()
@@ -169,8 +182,11 @@ func _physics_process(delta: float) -> void:
 		return
 	_state_time += delta
 	_cooldown = maxf(_cooldown - delta, 0.0)
+	_jump_buffer = maxf(_jump_buffer - delta, 0.0)
 	if brain:
 		brain.update(self, delta)
+		if brain.wants_jump(self):
+			_jump_buffer = 0.12
 
 	match state:
 		State.SPAWNING:
@@ -184,12 +200,14 @@ func _physics_process(delta: float) -> void:
 				landed.emit(self)
 				_set_state(State.FROZEN)
 		State.ACTIVE:
-			_update_move(delta, 1.0)
-			if brain and brain.wants_push(self) and _cooldown <= 0.0:
+			_update_move(delta, 1.0 if is_on_floor() else air_control)
+			if brain and brain.wants_push(self) and _cooldown <= 0.0 and is_on_floor():
 				_start_push()
+			_try_jump()
 			_apply_gravity_and_move(delta)
 		State.PUSHING:
 			_update_push(delta)
+			_try_jump()
 			_apply_gravity_and_move(delta)
 		State.HITSTUN:
 			var h := Vector2(velocity.x, velocity.z) * exp(-knockback_friction * delta)
@@ -217,14 +235,16 @@ func _physics_process(delta: float) -> void:
 			pass
 
 
+## `control` scales acceleration/braking (lower in the air), never the top speed, so a
+## running jump keeps its momentum.
 func _update_move(delta: float, control: float) -> void:
 	var wish: Vector3 = brain.get_move(self) if brain else Vector3.ZERO
 	wish.y = 0.0
 	if wish.length() > 1.0:
 		wish = wish.normalized()
-	var target := Vector2(wish.x, wish.z) * move_speed * control
+	var target := Vector2(wish.x, wish.z) * move_speed
 	var cur := Vector2(velocity.x, velocity.z)
-	var rate := acceleration if target.length_squared() > 0.0001 else deceleration
+	var rate := (acceleration if target.length_squared() > 0.0001 else deceleration) * control
 	# Faster response when reversing direction keeps the controls snappy.
 	if target.length_squared() > 0.0001 and cur.dot(target) < 0.0:
 		rate *= 1.6
@@ -242,14 +262,47 @@ func _turn_towards(dir: Vector3, delta: float) -> void:
 
 
 func _apply_gravity_and_move(delta: float) -> void:
-	if not _has_support():
+	# Support is only checked at ground level: a jumping character flies over holes and
+	# only drops into one if it comes down over it.
+	var grounded_height := global_position.y <= 0.02 and velocity.y <= 0.0
+	if grounded_height and not _has_support():
 		_start_fall()
 		return
 	if not is_on_floor():
 		velocity.y -= gravity * delta
-	else:
-		velocity.y = minf(velocity.y, 0.0)
+	elif velocity.y < 0.0:
+		velocity.y = 0.0
 	move_and_slide()
+	var airborne := not is_on_floor()
+	if _was_airborne and not airborne:
+		_squash_vel += 6.0
+		if fx:
+			fx.dust_ring(global_position + Vector3.UP * 0.05, 4)
+	_was_airborne = airborne
+
+
+## Starts a buffered jump if standing on the ground.
+func _try_jump() -> void:
+	if _jump_buffer <= 0.0 or not is_on_floor():
+		return
+	_jump_buffer = 0.0
+	velocity.y = jump_velocity
+	_squash_vel -= 7.0
+	if fx:
+		fx.puff(global_position + Vector3.UP * 0.05, 1.0)
+	jumped.emit(self)
+
+
+## Point between the hands, where gathered magic is held (world space).
+func hand_anchor() -> Vector3:
+	var p := _visual.global_position if _visual else global_position
+	return p + facing * 0.42 + Vector3.UP * (0.42 + 0.12 * _cast_pose) * model_scale
+
+
+## A small bob of the body on each correct syllable.
+func cast_pulse() -> void:
+	_cast_bob = 1.0
+	_squash_vel += 2.5
 
 
 ## True while the floor collision exists right under the character's centre.
@@ -464,6 +517,22 @@ func _animate_parts(delta: float) -> void:
 			hand_r = Vector3(-0.05, 0.25, 0.0)
 			_squash = minf(_squash, -1.5)
 
+	# Airborne: tuck the feet and lift the arms a little.
+	var air := not is_on_floor() and state in [State.ACTIVE, State.PUSHING, State.HITSTUN]
+	if air:
+		foot_l = Vector3(0.0, 0.08, 0.05)
+		foot_r = Vector3(0.0, 0.1, -0.03)
+		hand_l.y += 0.12
+		hand_r.y += 0.12
+	# Casting: the hands come together in front of the chest, holding the gathered magic.
+	# Only the hands are overridden, so walking, jumping and knockback keep animating.
+	_cast_pose = lerpf(_cast_pose, 1.0 if cast_level > 0.0 else 0.0, 1.0 - exp(-16.0 * delta))
+	_cast_bob = move_toward(_cast_bob, 0.0, delta * 6.0)
+	if _cast_pose > 0.01 and state in [State.ACTIVE, State.HITSTUN, State.FROZEN]:
+		var hold := Vector3(0.0, 0.1 + 0.06 * cast_level + 0.03 * _cast_bob, 0.2 + 0.05 * _cast_bob)
+		hand_l = hand_l.lerp(Vector3(-0.1, hold.y, hold.z), _cast_pose)
+		hand_r = hand_r.lerp(Vector3(0.1, hold.y, hold.z), _cast_pose)
+		target_lean += 0.06 * _cast_pose
 	if state != State.PUSHING:
 		_lean = lerpf(_lean, target_lean, 1.0 - exp(-14.0 * delta))
 	_hit_lean = move_toward(_hit_lean, 0.0, delta * 3.0)

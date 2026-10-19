@@ -69,6 +69,10 @@ void vertex() {
 	vec2 local = VERTEX.xy * sprite_texels * texel;
 	// A tiny pull toward the camera avoids z-fighting with the ground at the base.
 	VERTEX = bv + vec3(local, 0.0) + vec3(pv.xy * top, depth_bias);
+	// Tufts whose base is over a hole (holes can open at runtime) collapse to a point.
+	if (arena_sdf_at(base.xz).r > -0.08) {
+		VERTEX = bv;
+	}
 	v_up_view = normalize((VIEW_MATRIX * vec4(0.0, 1.0, 0.0, 0.0)).xyz);
 	NORMAL = v_up_view;
 	// Light/shadow sample point: just above the soil to avoid shadow acne on the ground plane.

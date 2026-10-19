@@ -1,0 +1,33 @@
+[gd_resource type="Resource" script_class="SpellBook" format=3 uid="uid://y1gkp6mk5xu"]
+
+[ext_resource type="Script" uid="uid://xglpiunhycnl" path="res://scripts/spells/spell_book.gd" id="1_book"]
+[ext_resource type="Script" uid="uid://dmahyoj6rho6i" path="res://scripts/spells/spell_definition.gd" id="2_def"]
+
+[sub_resource type="Resource" id="push"]
+script = ExtResource("2_def")
+id = &"push"
+display_name = "Push"
+syllables = PackedInt32Array(0, 1, 2, 3, 0)
+beats = PackedFloat32Array(1, 0.5, 0.5, 1, 1)
+
+[sub_resource type="Resource" id="create_hole"]
+script = ExtResource("2_def")
+id = &"create_hole"
+display_name = "Open Pit"
+syllables = PackedInt32Array(2, 3, 2, 3)
+beats = PackedFloat32Array(1.5, 0.5, 1.5, 0.5)
+effect = 1
+palette_index = 11
+
+[sub_resource type="Resource" id="close_hole"]
+script = ExtResource("2_def")
+id = &"close_hole"
+display_name = "Mend Earth"
+syllables = PackedInt32Array(1, 3, 1, 3, 0)
+beats = PackedFloat32Array(1, 1, 0.5, 0.5, 1)
+effect = 2
+palette_index = 28
+
+[resource]
+script = ExtResource("1_book")
+spells = Array[ExtResource("2_def")]([SubResource("push"), SubResource("create_hole"), SubResource("close_hole")])

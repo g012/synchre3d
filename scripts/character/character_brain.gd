@@ -13,6 +13,12 @@ func get_move(_character: ArenaCharacter) -> Vector3:
 	return Vector3.ZERO
 
 
-## True when the character should start a push now (only asked when a push is possible).
+## True when the character should start a melee push now (only asked when possible).
+## Human players attack with spells instead; the AI still uses this.
 func wants_push(_character: ArenaCharacter) -> bool:
+	return false
+
+
+## True when the character should jump now (only asked when a jump is possible).
+func wants_jump(_character: ArenaCharacter) -> bool:
 	return false

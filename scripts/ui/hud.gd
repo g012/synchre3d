@@ -17,6 +17,7 @@ var _mode: Label
 var _message_time := 0.0
 var _message_base_y := 0.0
 var _palette: Image
+var _panels: Array[RhythmPanel] = []
 
 
 func _ready() -> void:
@@ -83,6 +84,10 @@ func _layout() -> void:
 	_sub.position = Vector2(0, _message_base_y + 32)
 	_hint.position = Vector2(6, s.y - 14)
 	_mode.position = Vector2(6, 6)
+	for i in _panels.size():
+		var p := _panels[i]
+		var x := 6.0 if i == 0 else s.x - p.size.x - 6.0
+		p.position = Vector2(x, s.y - 16 - p.size.y)
 
 
 func set_names(a: String, color_a: int, b: String, color_b: int) -> void:
@@ -99,9 +104,24 @@ func set_score(a: int, b: int) -> void:
 func set_mode(two_player: bool) -> void:
 	_mode.text = "2P LOCAL" if two_player else "1P VS CPU"
 	if two_player:
-		_hint.text = "P1 WASD + SPACE   P2 ARROWS + ENTER   TAB 1P   R RESTART"
+		_hint.text = "PADS 1+2 / P1 WASD IJKL SPACE / P2 ARROWS NUMPAD 2468 0   BACK/TAB 1P"
 	else:
-		_hint.text = "WASD/ARROWS MOVE   SPACE PUSH   TAB 2 PLAYERS   R RESTART"
+		_hint.text = "STICK/WASD MOVE  A B X Y (K L J I) CHANT  RT/SPACE JUMP  BACK/TAB 2P  START/R"
+
+
+## One rhythm readout per human caster: P1 bottom-left, P2 bottom-right.
+func set_rhythm_panels(casters: Array[SpellCaster]) -> void:
+	for p in _panels:
+		p.queue_free()
+	_panels.clear()
+	for i in casters.size():
+		if casters[i] == null:
+			continue
+		var panel := RhythmPanel.new()
+		panel.setup(casters[i], "P%d" % (i + 1), _font, _palette)
+		_root.add_child(panel)
+		_panels.append(panel)
+	_layout()
 
 
 func show_message(text: String, color := Color.WHITE, sub := "") -> void:
