@@ -135,6 +135,8 @@ func _draw() -> void:
 		_text(Vector2(4, 44), _progress_spell.incantation().to_upper().substr(0, 26), Color(1, 1, 1, 0.75))
 	elif e.bpm > 0.0:
 		_text(Vector2(4, 44), "CHANT ON THE BEAT", Color(1, 1, 1, 0.45))
+	else:
+		_text(Vector2(4, 44), "OR START A SPELL", Color(1, 1, 1, 0.45))
 
 	# --- spell sheets: each spell's notes on a 4-beat timeline
 	var sx := 108.0

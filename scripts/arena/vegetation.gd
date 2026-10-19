@@ -28,7 +28,7 @@ func rebuild() -> void:
 	for c in get_children():
 		remove_child(c)
 		c.queue_free()
-	var cfg := _arena.config
+	var cfg := _arena.layout
 	var rng := RandomNumberGenerator.new()
 	rng.seed = cfg.seed * 31 + 5
 	var clumps := FastNoiseLite.new()
@@ -84,13 +84,14 @@ func rebuild() -> void:
 	mmi.multimesh = mm
 	mmi.material_override = grass_material
 	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	mmi.custom_aabb = AABB(Vector3(-ext.x - 2.0, -1.0, -ext.y - 2.0), Vector3(ext.x * 2.0 + 4.0, 3.0, ext.y * 2.0 + 4.0))
+	# Tall enough for tufts lifted by mounds (shader-side).
+	mmi.custom_aabb = AABB(Vector3(-ext.x - 2.0, -1.0, -ext.y - 2.0), Vector3(ext.x * 2.0 + 4.0, Arena.MOUND_LEVELS[-1].y + 3.0, ext.y * 2.0 + 4.0))
 	add_child(mmi)
 
 
 ## Probability of a tuft at `p`: noise clumps, thinned toward edges and props.
 func _density(p: Vector2, clumps: FastNoiseLite, sdf: float) -> float:
-	var cfg := _arena.config
+	var cfg := _arena.layout
 	var d := smoothstep(-0.05, 0.25, clumps.get_noise_2d(p.x, p.y))
 	return d * smoothstep(cfg.grass_edge_margin, cfg.grass_edge_margin + 0.5, -sdf)
 

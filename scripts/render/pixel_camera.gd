@@ -17,6 +17,19 @@ extends Camera3D
 @export var focus := Vector3(0.0, -0.75, 0.25)
 @export var distance := 30.0
 
+@export_group("Follow")
+## Nodes kept in view (the fighters). Empty = fixed `focus`.
+var targets: Array[Node3D] = []
+## Space kept around the targets, in world units on the view plane (x, y).
+@export var follow_margin := Vector2(5.5, 3.6)
+## The camera zooms out (larger texels) up to this when the targets spread apart.
+@export var max_texel_size := 0.05
+@export var follow_speed := 2.5
+@export var zoom_speed := 1.4
+## The focus stays inside this XZ rectangle (set from the arena size).
+var focus_bounds := Rect2(-1e4, -1e4, 2e4, 2e4)
+@export_group("")
+
 ## Optional sun whose direction is forwarded to the post-process edge highlights.
 @export var sun: DirectionalLight3D
 @export var post_process: MeshInstance3D
@@ -27,6 +40,8 @@ var _snap_basis := Basis.IDENTITY
 var _shake_strength := 0.0
 var _shake_time := 0.0
 var _noise := FastNoiseLite.new()
+var _base_texel := 0.0
+var _focus_offset := Vector3.ZERO
 
 
 func _ready() -> void:
@@ -39,6 +54,8 @@ func _ready() -> void:
 	physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 	_noise.frequency = 1.0
 	_noise.seed = 7
+	_base_texel = texel_size
+	_focus_offset = Vector3(0.0, focus.y, focus.z)
 	_update_basis()
 
 
@@ -51,8 +68,46 @@ func shake(strength: float) -> void:
 	_shake_strength = maxf(_shake_strength, strength)
 
 
+## Recentres instantly on the targets (new round).
+func snap_to_targets() -> void:
+	_follow(0.0, true)
+
+
+## Moves the focus toward the targets' centre and zooms out just enough to keep all of
+## them (plus a margin) on screen; never zooms in past the authored pixel density.
+func _follow(delta: float, instant := false) -> void:
+	var pts: Array[Vector3] = []
+	for t in targets:
+		if is_instance_valid(t) and t.is_visible_in_tree():
+			pts.append(t.global_position)
+	if pts.is_empty():
+		return
+	var lo := Vector3(INF, INF, INF)
+	var hi := -lo
+	var mid := Vector3.ZERO
+	var inv := _snap_basis.inverse()
+	for p in pts:
+		mid += p
+		var v := inv * p
+		lo = lo.min(v)
+		hi = hi.max(v)
+	mid /= pts.size()
+	var vp := Vector2((get_viewport() as SubViewport).size)
+	var need := maxf((hi.x - lo.x + follow_margin.x * 2.0) / vp.x, (hi.y - lo.y + follow_margin.y * 2.0) / vp.y)
+	var target_texel := clampf(need, _base_texel, max_texel_size)
+	var c := Vector2(clampf(mid.x, focus_bounds.position.x, focus_bounds.end.x), clampf(mid.z, focus_bounds.position.y, focus_bounds.end.y))
+	var target_focus := Vector3(c.x, _focus_offset.y + mid.y * 0.5, c.y + _focus_offset.z)
+	if instant:
+		texel_size = target_texel
+		focus = target_focus
+	else:
+		texel_size = lerpf(texel_size, target_texel, 1.0 - exp(-zoom_speed * delta))
+		focus = focus.lerp(target_focus, 1.0 - exp(-follow_speed * delta))
+
+
 func _process(delta: float) -> void:
 	_update_basis()
+	_follow(delta)
 	var vp_height := float((get_viewport() as SubViewport).size.y)
 	size = texel_size * vp_height
 

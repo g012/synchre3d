@@ -2,6 +2,7 @@ class_name MagicBolt
 extends Node3D
 ## The Push spell's projectile: a glowing orb that flies straight from the caster's hands and
 ## shoves the first opponent it touches with the same knockback as the old melee push.
+## It glides over gentle slopes but bursts against steep ones (a mountain is a shield).
 
 const SHADER := preload("res://shaders/magic.gdshader")
 
@@ -40,9 +41,25 @@ func _ready() -> void:
 	add_child(_mesh)
 
 
+## Height kept above the ground while gliding.
+const GLIDE := 0.5
+
+
 func _physics_process(delta: float) -> void:
 	var step := direction * speed * delta
 	global_position += step
+	if arena:
+		# Climbs anything walkable at once (<= ~50 deg), bursts against steeper ground,
+		# and sinks back gently after a crest.
+		var ground := arena.height_at(Vector2(global_position.x, global_position.z)) + GLIDE
+		var climb := ground - global_position.y
+		if climb > step.length() * 1.2 + 0.05:
+			_pop()
+			return
+		if climb > 0.0:
+			global_position.y = ground
+		else:
+			global_position.y = move_toward(global_position.y, ground, 2.5 * delta)
 	_travelled += step.length()
 	_mesh.scale = Vector3.ONE * (1.0 + 0.12 * sin(_travelled * 9.0))
 

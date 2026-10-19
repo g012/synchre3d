@@ -4,6 +4,7 @@ extends Node3D
 ## Places the Blender-made props (trees, bushes, rocks, stumps, mushrooms) listed in the
 ## ArenaConfig, applies toon materials, turns foliage blobs into leaf-card billboards and adds
 ## obstacle colliders. Footprints are published to `arena.obstacles` for grass and AI.
+## Props ride the ground when spells raise mounds under them (`_on_ground_changed`).
 
 const TREES: Array[PackedScene] = [preload("res://assets/models/tree_round.glb"), preload("res://assets/models/tree_small.glb")]
 const BUSH := preload("res://assets/models/bush.glb")
@@ -14,13 +15,23 @@ const MUSHROOMS := preload("res://assets/models/mushrooms.glb")
 ## Leaf cards per square unit of foliage blob surface.
 @export var leaf_density := 11.0
 
+# Every placed prop: { node, body (or null), xz: Vector2, y: float, leaves: Vector2i range }.
+var _entries: Array[Dictionary] = []
+var _leaves: MultiMeshInstance3D
+var _leaf_base: Array[Transform3D] = []
+var _arena: Arena
+
 
 func rebuild_from_arena(arena: Arena) -> void:
 	for c in get_children():
 		remove_child(c)
 		c.queue_free()
+	_entries.clear()
+	_arena = arena
+	if not arena.ground_changed.is_connected(_on_ground_changed):
+		arena.ground_changed.connect(_on_ground_changed)
 	arena.obstacles.clear()
-	var cfg := arena.config
+	var cfg := arena.layout
 	var rng := RandomNumberGenerator.new()
 	rng.seed = cfg.seed * 7 + 1
 	var leaves := LeafCards.new()
@@ -28,12 +39,13 @@ func rebuild_from_arena(arena: Arena) -> void:
 	for i in cfg.trees.size():
 		var t := cfg.trees[i]
 		var node := _place(arena, TREES[i % TREES.size()], t, rng, 0.32 * t.z, true)
-		leaves.add_from(node, rng, leaf_density)
+		_entries[-1].leaves = leaves.add_from(node, rng, leaf_density)
 		# A few mushrooms at the foot of every tree, on the side facing the island centre.
 		var a := atan2(-t.y, -t.x) + rng.randf_range(-0.8, 0.8)
 		_place(arena, MUSHROOMS, Vector3(t.x + cos(a) * 0.6 * t.z, t.y + sin(a) * 0.6 * t.z, 1.0), rng, 0.0, false)
 	for b in cfg.bushes:
-		leaves.add_from(_place(arena, BUSH, b, rng, 0.5 * b.z, true), rng, leaf_density)
+		var node := _place(arena, BUSH, b, rng, 0.5 * b.z, true)
+		_entries[-1].leaves = leaves.add_from(node, rng, leaf_density)
 	for i in cfg.rocks.size():
 		var r := cfg.rocks[i]
 		_place(arena, ROCKS[i % ROCKS.size()], r, rng, 0.42 * r.z, false)
@@ -42,14 +54,42 @@ func rebuild_from_arena(arena: Arena) -> void:
 	for m in cfg.mushrooms:
 		_place(arena, MUSHROOMS, m, rng, 0.0, false)
 
-	var mmi := leaves.build()
-	if mmi:
-		add_child(mmi)
+	_leaves = leaves.build()
+	_leaf_base = leaves.transforms
+	if _leaves:
+		add_child(_leaves)
+
+
+## Lifts props (and their colliders and leaf cards) onto the current ground height.
+func _on_ground_changed(rect: Rect2) -> void:
+	if not _arena:
+		return
+	var grown := rect.grow(0.2)
+	for e in _entries:
+		if not grown.has_point(e.xz):
+			continue
+		var y := _arena.height_at(e.xz)
+		if is_equal_approx(y, e.y):
+			continue
+		e.y = y
+		if is_instance_valid(e.node):
+			e.node.position.y = y
+		if e.body and is_instance_valid(e.body):
+			e.body.position.y = y
+		var r: Vector2i = e.leaves
+		if _leaves and r.y > r.x:
+			var mm := _leaves.multimesh
+			for i in range(r.x, r.y):
+				var t := _leaf_base[i]
+				t.origin.y += y
+				mm.set_instance_transform(i, t)
 
 
 func _place(arena: Arena, scene: PackedScene, p: Vector3, rng: RandomNumberGenerator, collider_radius: float, foliage: bool) -> Node3D:
 	var node := scene.instantiate() as Node3D
 	node.position = Vector3(p.x, 0.0, p.y)
+	var entry := {"node": node, "body": null, "xz": Vector2(p.x, p.y), "y": 0.0, "leaves": Vector2i.ZERO}
+	_entries.append(entry)
 	node.rotation.y = rng.randf() * TAU
 	node.scale = Vector3.ONE * p.z
 	add_child(node)
@@ -73,6 +113,7 @@ func _place(arena: Arena, scene: PackedScene, p: Vector3, rng: RandomNumberGener
 		body.add_child(cs)
 		body.position = node.position
 		add_child(body)
+		entry.body = body
 		arena.obstacles.append(Vector3(p.x, p.y, collider_radius))
 	else:
 		# Small decorations only keep grass from growing through them.
@@ -85,7 +126,9 @@ class LeafCards:
 	var transforms: Array[Transform3D] = []
 	var customs: Array[Color] = []
 
-	func add_from(prop: Node3D, rng: RandomNumberGenerator, density: float) -> void:
+	## Adds the cards of one prop; returns their instance range [start, end).
+	func add_from(prop: Node3D, rng: RandomNumberGenerator, density: float) -> Vector2i:
+		var start := transforms.size()
 		for mi in ToonMaterials.mesh_instances(prop):
 			if not mi.name.begins_with("Foliage"):
 				continue
@@ -126,6 +169,7 @@ class LeafCards:
 				customs.append(Color(n.x * 0.5 + 0.5, n.y * 0.5 + 0.5, n.z * 0.5 + 0.5, rng.randi_range(0, 3) / 4.0))
 			# The blob itself becomes a slightly shrunken dark core that fills gaps between cards.
 			mi.scale *= 0.82
+		return Vector2i(start, transforms.size())
 
 	func build() -> MultiMeshInstance3D:
 		if transforms.is_empty():
@@ -147,5 +191,6 @@ class LeafCards:
 		var aabb := AABB(transforms[0].origin, Vector3.ZERO)
 		for t in transforms:
 			aabb = aabb.expand(t.origin)
-		mmi.custom_aabb = aabb.grow(1.0)
+		# Grown upward too: leaves rise with props standing on mounds.
+		mmi.custom_aabb = aabb.grow(1.0).expand(aabb.end + Vector3.UP * (Arena.MOUND_LEVELS[-1].y + 1.0))
 		return mmi

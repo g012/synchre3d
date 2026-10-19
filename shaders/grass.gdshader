@@ -48,6 +48,9 @@ vec2 actor_push(vec2 base, vec4 actor) {
 
 void vertex() {
 	vec3 base = MODEL_MATRIX[3].xyz;
+	// Tufts ride the mounds; steep slopes are bare rock.
+	vec3 hg = arena_height(base.xz);
+	base.y += hg.x;
 	// abs(): the projection may carry a Y flip depending on the rendering backend.
 	float texel = 2.0 / abs(PROJECTION_MATRIX[1][1] * VIEWPORT_SIZE.y);
 	vec2 grid_off = mod(VIEWPORT_SIZE, 2.0) * 0.5 * texel;
@@ -69,11 +72,12 @@ void vertex() {
 	vec2 local = VERTEX.xy * sprite_texels * texel;
 	// A tiny pull toward the camera avoids z-fighting with the ground at the base.
 	VERTEX = bv + vec3(local, 0.0) + vec3(pv.xy * top, depth_bias);
-	// Tufts whose base is over a hole (holes can open at runtime) collapse to a point.
-	if (arena_sdf_at(base.xz).r > -0.08) {
+	// Tufts whose base is over a hole (holes open at runtime) or on a cliff collapse to a point.
+	if (arena_ground_sdf(base.xz) > -0.08 || dot(hg.yz, hg.yz) > 0.55) {
 		VERTEX = bv;
 	}
-	v_up_view = normalize((VIEW_MATRIX * vec4(0.0, 1.0, 0.0, 0.0)).xyz);
+	// Lit with the ground's normal, so tufts on a hill's shaded flank darken with it.
+	v_up_view = normalize((VIEW_MATRIX * vec4(arena_light_normal(hg.yz), 0.0)).xyz);
 	NORMAL = v_up_view;
 	// Light/shadow sample point: just above the soil to avoid shadow acne on the ground plane.
 	v_base_view = (VIEW_MATRIX * vec4(base + vec3(0.0, 0.12, 0.0), 1.0)).xyz;

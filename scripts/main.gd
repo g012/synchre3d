@@ -2,9 +2,9 @@ extends Node
 ## Game flow: spawns the two fighters, runs rounds (intro -> fight -> winner -> reset),
 ## tracks wins, and handles the 1P / 2P toggle and debug keys.
 ##
-## Human players move/jump through a PlayerBrain and attack with rhythmic incantations:
+## Human players move/jump/shove through a PlayerBrain and cast rhythmic incantations:
 ## PlayerInput (timestamped A/B/X/Y) -> SpellCaster (rhythm engine) -> SpellEffects.
-## The CPU opponent keeps the original melee push.
+## The CPU opponent uses the melee push only.
 
 const CHARACTER_SCENE := preload("res://scenes/character.tscn")
 const PIP_MODEL := preload("res://assets/models/pip.glb")
@@ -44,6 +44,8 @@ func _ready() -> void:
 	fighters[1].opponent = fighters[0]
 	hud.set_names("Pip", 4, "Mog", 11)
 	spells.setup(arena, fx, camera, fighters)
+	_frame_arena()
+	arena.rebuilt.connect(_frame_arena)
 	_apply_mode()
 	start_round()
 
@@ -109,22 +111,30 @@ func _set_human(i: int, human: bool) -> void:
 		casters[i] = null
 
 
+## The camera follows the fighters but never wanders far past the island.
+func _frame_arena() -> void:
+	var r := arena.layout.radius
+	camera.focus_bounds = Rect2(-r * 0.62, r * 1.24)
+
+
 func start_round() -> void:
 	phase = Phase.INTRO
 	phase_time = 0.0
 	_landed = 0
 	_round_decided = false
-	arena.reset_holes()
+	arena.reset_ground()
 	spells.clear()
 	for c in casters:
 		if c:
 			c.cancel()
-	var sp := arena.config.spawn_points
+	var sp := arena.layout.spawn_points
 	for i in fighters.size():
 		var p := sp[i % sp.size()]
 		var other := sp[(i + 1) % sp.size()]
 		var face := Vector3(other.x - p.x, 0.0, other.y - p.y)
 		fighters[i].spawn(Vector3(p.x, 0.0, p.y), face)
+	_update_camera_targets()
+	camera.snap_to_targets()
 	hud.show_message("READY?", hud.palette_color(1, 3))
 
 
@@ -178,6 +188,15 @@ func _physics_process(delta: float) -> void:
 			if phase_time > round_over_time:
 				start_round()
 	_update_grass_actors()
+	_update_camera_targets()
+
+
+func _update_camera_targets() -> void:
+	var t: Array[Node3D] = []
+	for f in fighters:
+		if f.state != ArenaCharacter.State.OUT:
+			t.append(f)
+	camera.targets = t
 
 
 func _update_grass_actors() -> void:

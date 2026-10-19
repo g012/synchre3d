@@ -3,34 +3,59 @@ class_name Arena
 extends Node3D
 ## Procedural floating-island arena.
 ##
-## The ground is described by a signed distance field (negative = solid ground):
-## an organic ellipse minus a set of holes. From it we build:
-##  * the grass top surface (marching squares -> holes are real gaps in the mesh), split into
-##    chunks that each own their mesh, hole walls and floor/wall collision,
-##  * one watertight outer shell: layered cliff + rocky underside (built once),
-##  * an SDF texture (R = ground, G = island outline) used by the terrain/grass/character
-##    shaders, plus `ground_sdf()` for gameplay and AI queries.
+## The walkable ground is described analytically: an organic island outline, minus runtime
+## holes, raised by runtime mounds (bump -> hill -> mountain). Static geometry is built once
+## per layout; everything that changes during play is cheap data:
 ##
-## Holes are runtime state: they start from the ArenaConfig, and spells can open new ones or
-## close existing ones (`open_hole`, `close_hole`). An animated hole only rebuilds the chunks
-## and SDF texels it touches, so the mesh and the collision stay exact while it grows/shrinks.
-## Mark it @tool so editing the ArenaConfig resource updates the editor view.
+##  * Grass top: a marching-squares mesh of the island outline only (chunked for culling).
+##    Its vertices are lifted by the mounds in the vertex shader, and fragments over a hole
+##    are discarded, both from a tiny "features" texture (one texel row per hole/mound
+##    parameter set) shared by every terrain and grass shader.
+##  * Holes: each hole owns a small rocky wall tube, built once when it opens and simply
+##    scaled while it opens/closes. Its top follows the mound height in the shader.
+##  * Collision: a grid of HeightMapShape3D chunks (heights from the mounds, NaN = real gap
+##    over holes and off the island). A changing hole or mound only re-samples the few
+##    hundred grid points it covers.
+##  * One watertight outer shell (cliff + rocky underside), and an island SDF texture.
+##
+## So opening or closing a hole costs a texel upload, a node scale and a few hundred height
+## samples per tick, instead of re-meshing terrain. `ground_sdf()` / `height_at()` mirror the
+## shader math exactly for gameplay, AI and spell targeting.
+## @tool: editing the ArenaConfig resource updates the editor view.
 
 signal rebuilt
 ## A hole finished opening (scale reached 1) or closing (removed / scale 0).
 signal hole_opened(hole: Dictionary)
 signal hole_closed(hole: Dictionary)
+## Ground heights changed inside `rect` (world XZ): props follow the mounds.
+signal ground_changed(rect: Rect2)
+## A mound finished growing to its new level.
+signal mound_raised(mound: Dictionary)
 
 const LAYER_FLOOR := 1
 const LAYER_WALLS := 2
 const LAYER_OBSTACLES := 4
 const LAYER_CHARACTERS := 8
-## Marching-squares cells per chunk side.
-const CHUNK_CELLS := 12
-## Beyond this distance from its rim a hole does not affect geometry (see ground_sdf).
+## Marching-squares cells per top-mesh chunk side.
+const CHUNK_CELLS := 24
+## Collision heightfield: sample spacing (world units) and cells per chunk side (17x17
+## samples per HeightMapShape3D: square and 2^n + 1, and small so a change rebuilds little).
+const HM_SPACING := 0.2
+const HM_CHUNK := 16
+## Slots in the shader features texture.
+const MAX_HOLES := 64
+const MAX_MOUNDS := 32
+## Beyond this distance from its rim a hole does not need its exact outline (see ground_sdf).
 const FAR_HOLE := 1.5
-## Hole animations rebuild geometry at most this often (seconds).
-const HOLE_UPDATE_INTERVAL := 0.05
+## Mound levels (radius, height, sharpness): a bump you can walk over, a hill, then a steep
+## rocky mountain that blocks movement and bolts.
+const MOUND_LEVELS: Array[Vector3] = [Vector3(1.25, 0.5, 0.0), Vector3(2.1, 1.25, 0.05), Vector3(2.5, 2.9, 0.8)]
+const MOUND_GROW_TIME := 0.45
+## Mounds flatten out between these distances inside the island edge (cliff top stays flat).
+const ISLAND_FADE := Vector2(0.4, 2.2)
+## Collision is removed where the ground SDF exceeds this (holes / off the island). Slightly
+## positive because a NaN sample removes every collision triangle touching it.
+const GAP_SDF := 0.15
 
 @export var config: ArenaConfig:
 	set(value):
@@ -43,6 +68,9 @@ const HOLE_UPDATE_INTERVAL := 0.05
 @export var terrain_material: Material
 @export_tool_button("Rebuild") var rebuild_action := rebuild
 
+## The layout actually built (config scaled / randomized). Read this, not `config`.
+var layout: ArenaConfig
+var layout_seed := 0
 var sdf_texture: ImageTexture
 var sdf_rect := Rect2()
 ## Solid prop footprints (x, z, radius), filled by Props; used by grass placement and the AI.
@@ -52,21 +80,38 @@ var decor_footprints: Array[Vector3] = []
 ## Runtime holes: { id, center: Vector2, radius, scale (0..1 shown), target (0 or 1),
 ## duration (s for a full open/close), ph0, ph1 (outline wobble phases), dynamic: bool }.
 var holes: Array[Dictionary] = []
+## Runtime mounds: { id, center, radius, height, sharp, level, ph0, ph1, from, to: Vector3
+## (radius, height, sharp), t (growth 0..1) }.
+var mounds: Array[Dictionary] = []
 
 var _rebuild_queued := false
 var _phase := PackedFloat32Array()
-var _next_hole_id := 0
-# Marching-squares grid.
-var _cs := 0.16
+var _next_id := 0
+var _rng := RandomNumberGenerator.new()
+# Top mesh marching-squares grid.
+var _cs := 0.2
 var _origin := Vector2.ZERO
 var _nx := 0
 var _nz := 0
 var _vals := PackedFloat32Array()
-var _chunks := {}
 var _sdf_image: Image
-var _hole_update_timer := 0.0
-var _pending_dirty := Rect2()
-var _has_pending := false
+# Shader features (holes + mounds).
+var _features_image: Image
+var _features_texture: ImageTexture
+var _features_dirty := false
+var _walls := {}
+# Collision heightfield.
+var _hm_origin := Vector2.ZERO
+var _hm_cells := Vector2i.ZERO
+var _hm_island := PackedFloat32Array()
+var _hm_fade := PackedFloat32Array()
+var _hm_shapes := {}
+var _hm_data := {}
+var _collision_dirty := Rect2()
+var _has_collision_dirty := false
+var _mound_dirty := Rect2()
+var _has_mound_dirty := false
+var _mound_tick := false
 
 
 func _ready() -> void:
@@ -82,20 +127,12 @@ func _queue_rebuild() -> void:
 		rebuild()).call_deferred()
 
 
-# ---------------------------------------------------------------- distance field
-
-func _wobble_phases() -> void:
-	var rng := RandomNumberGenerator.new()
-	rng.seed = config.seed
-	_phase.resize(8 + config.holes.size() * 2)
-	for i in _phase.size():
-		_phase[i] = rng.randf() * TAU
-
+# ---------------------------------------------------------------- distance field / height
 
 func island_sdf(p: Vector2) -> float:
-	var r := config.radius
+	var r := layout.radius
 	var a := atan2(p.y, p.x)
-	var w := config.edge_wobble * (0.55 * sin(3.0 * a + _phase[0]) + 0.3 * sin(5.0 * a + _phase[1]) + 0.15 * sin(9.0 * a + _phase[2]))
+	var w := layout.edge_wobble * (0.55 * sin(3.0 * a + _phase[0]) + 0.3 * sin(5.0 * a + _phase[1]) + 0.15 * sin(9.0 * a + _phase[2]))
 	var l := (p / r).length()
 	if l < 0.0001:
 		return -minf(r.x, r.y)
@@ -104,10 +141,11 @@ func island_sdf(p: Vector2) -> float:
 
 
 ## Signed distance to a hole's (wobbly, scaled) outline: negative inside the hole.
+## Same formula as `arena_hole_dist` in toon.gdshaderinc.
 func hole_sdf(p: Vector2, h: Dictionary) -> float:
 	var d: Vector2 = p - h.center
 	var a := atan2(d.y, d.x)
-	var r: float = (h.radius + config.hole_wobble * (0.6 * sin(3.0 * a + h.ph0) + 0.4 * sin(5.0 * a + h.ph1))) * h.scale
+	var r: float = (h.radius + layout.hole_wobble * (0.6 * sin(3.0 * a + h.ph0) + 0.4 * sin(5.0 * a + h.ph1))) * h.scale
 	return d.length() - r
 
 
@@ -120,7 +158,7 @@ func ground_sdf(p: Vector2) -> float:
 			continue
 		# Far from its rim, a hole's wobble cannot change the sign of anything: use the plain
 		# circle distance (no trig), which is within `hole_wobble` of the exact value.
-		var reach: float = (h.radius + config.hole_wobble) * h.scale + FAR_HOLE
+		var reach: float = (h.radius + layout.hole_wobble) * h.scale + FAR_HOLE
 		var d2 := p.distance_squared_to(h.center)
 		if d2 > reach * reach:
 			d = maxf(d, h.radius * h.scale - sqrt(d2))
@@ -141,13 +179,39 @@ func is_over_ground(p: Vector2) -> bool:
 	return ground_sdf(p) < 0.0
 
 
-## True when the boundary at `p` belongs to the island outline rather than to a hole.
-func _is_outer_boundary(p: Vector2) -> bool:
-	var d := island_sdf(p)
-	for h in holes:
-		if h.scale > 0.02 and -hole_sdf(p, h) > d:
-			return false
-	return true
+## Ground height at `p` (0 = the flat lawn). Same formula as `arena_height` in the shaders.
+func height_at(p: Vector2) -> float:
+	if mounds.is_empty():
+		return 0.0
+	var best := 0.0
+	for m in mounds:
+		best = maxf(best, _mound_value(p, m))
+	if best <= 0.0:
+		return 0.0
+	return best * smoothstep(ISLAND_FADE.x, ISLAND_FADE.y, -island_sdf(p))
+
+
+## Ground slope at `p` as (dh/dx, dh/dz).
+func height_gradient(p: Vector2) -> Vector2:
+	var e := 0.06
+	return Vector2(height_at(p + Vector2(e, 0)) - height_at(p - Vector2(e, 0)),
+		height_at(p + Vector2(0, e)) - height_at(p - Vector2(0, e))) / (2.0 * e)
+
+
+func _mound_value(p: Vector2, m: Dictionary) -> float:
+	var d: Vector2 = p - m.center
+	var r: float = m.radius
+	var l2 := d.length_squared()
+	if m.height <= 0.0 or l2 >= r * r * 1.3689: # (1.17 r)^2: max outline wobble
+		return 0.0
+	var a := atan2(d.y, d.x)
+	var rr := r * (1.0 + 0.1 * sin(3.0 * a + m.ph0) + 0.06 * sin(5.0 * a + m.ph1))
+	var x := sqrt(l2) / rr
+	if x >= 1.0:
+		return 0.0
+	var smooth := (1.0 - x * x) * (1.0 - x * x)
+	var peak := pow(1.0 - x, 1.5)
+	return m.height * lerpf(smooth, peak, m.sharp)
 
 
 # ---------------------------------------------------------------- runtime holes
@@ -164,19 +228,17 @@ func can_open_hole(center: Vector2, radius: float) -> bool:
 
 
 ## Starts opening a new hole; returns its id, or -1 if it cannot open there.
-func open_hole(center: Vector2, radius: float, duration := 0.45) -> int:
-	if not can_open_hole(center, radius):
+func open_hole(center: Vector2, radius: float, duration := 0.3) -> int:
+	if not can_open_hole(center, radius) or holes.size() >= MAX_HOLES:
 		return -1
-	var h := {"id": _next_hole_id, "center": center, "radius": radius, "scale": 0.0,
-		"target": 1.0, "duration": duration, "ph0": randf() * TAU, "ph1": randf() * TAU,
-		"dynamic": true}
-	_next_hole_id += 1
-	holes.append(h)
+	var h := _add_hole(center, radius, 0.0, true, _rng.randf() * TAU, _rng.randf() * TAU)
+	h.target = 1.0
+	h.duration = duration
 	return h.id
 
 
 ## Starts closing hole `id`; returns false if there is no such open hole.
-func close_hole(id: int, duration := 0.6) -> bool:
+func close_hole(id: int, duration := 0.4) -> bool:
 	for h in holes:
 		if h.id == id and h.target > 0.0:
 			h.target = 0.0
@@ -199,62 +261,180 @@ func nearest_hole(p: Vector2, max_dist: float) -> Dictionary:
 	return best
 
 
-## Restores the holes of the ArenaConfig (new holes vanish, closed ones reopen) instantly.
-func reset_holes() -> void:
-	var dirty := Rect2()
-	var first := true
+## The hole whose current outline contains `p`; {} if none.
+func hole_at(p: Vector2) -> Dictionary:
 	for h in holes:
-		if h.dynamic or h.scale < 1.0:
-			var r := _hole_rect(h)
-			dirty = r if first else dirty.merge(r)
-			first = false
+		if h.scale > 0.02 and hole_sdf(p, h) < 0.0:
+			return h
+	return {}
+
+
+## Brings the ground back to the layout: spell holes vanish, closed ones reopen, mounds
+## flatten. Instant (new round).
+func reset_ground() -> void:
+	for h in holes:
+		if h.dynamic:
+			_free_wall(h.id)
 	holes = holes.filter(func(h): return not h.dynamic)
 	for h in holes:
 		h.scale = 1.0
 		h.target = 1.0
-	if not first:
-		_update_region(dirty)
+		_update_wall(h)
+	var had_mounds := not mounds.is_empty()
+	mounds.clear()
+	_features_dirty = true
+	_upload_features()
+	_refresh_collision(Rect2(_hm_origin, Vector2(_hm_cells) * HM_SPACING))
+	if had_mounds:
+		ground_changed.emit(sdf_rect)
+
+
+func _add_hole(center: Vector2, radius: float, scale: float, dynamic: bool, ph0: float, ph1: float) -> Dictionary:
+	var h := {"id": _next_id, "center": center, "radius": radius, "scale": scale,
+		"target": scale, "duration": 0.4, "ph0": ph0, "ph1": ph1, "dynamic": dynamic}
+	_next_id += 1
+	holes.append(h)
+	var wall := _build_hole_wall(h)
+	_walls[h.id] = wall
+	_add_generated(wall)
+	_update_wall(h)
+	_features_dirty = true
+	_mark_collision(_hole_rect(h))
+	return h
 
 
 func _hole_rect(h: Dictionary) -> Rect2:
-	var r: float = h.radius + config.hole_wobble + 0.5
+	var r: float = h.radius + layout.hole_wobble + 0.3
 	return Rect2(h.center - Vector2(r, r), Vector2(r, r) * 2.0)
 
 
+func _update_wall(h: Dictionary) -> void:
+	var wall: MeshInstance3D = _walls.get(h.id)
+	if wall:
+		wall.visible = h.scale > 0.02
+		wall.scale = Vector3(maxf(h.scale, 0.01), 1.0, maxf(h.scale, 0.01))
+
+
+func _free_wall(id: int) -> void:
+	var wall: Node = _walls.get(id)
+	if wall:
+		wall.queue_free()
+	_walls.erase(id)
+
+
+# ---------------------------------------------------------------- runtime mounds
+
+## Raises the ground around `p`: a new bump, or the next level (hill, mountain) of the mound
+## already there. Returns {"mound": m} or {"error": reason}.
+func raise_ground(p: Vector2) -> Dictionary:
+	for m in mounds:
+		if m.center.distance_to(p) < maxf(m.radius * 0.8, 1.0):
+			return grow_mound(m)
+	if island_sdf(p) > -(MOUND_LEVELS[0].x + 0.8):
+		return {"error": "too close to the edge"}
+	if mounds.size() >= MAX_MOUNDS:
+		return {"error": "no room"}
+	var m := {"id": _next_id, "center": p, "radius": 0.0, "height": 0.0, "sharp": 0.0, "level": 0,
+		"ph0": _rng.randf() * TAU, "ph1": _rng.randf() * TAU, "from": Vector3.ZERO, "to": Vector3.ZERO, "t": 1.0}
+	_next_id += 1
+	mounds.append(m)
+	_grow(m)
+	return {"mound": m}
+
+
+## Grows mound `m` to its next level. Returns {"mound": m} or {"error": reason}.
+func grow_mound(m: Dictionary) -> Dictionary:
+	if m.level >= MOUND_LEVELS.size():
+		return {"error": "already a mountain"}
+	_grow(m)
+	return {"mound": m}
+
+
+func _grow(m: Dictionary) -> void:
+	m.from = Vector3(m.radius, m.height, m.sharp)
+	m.to = MOUND_LEVELS[m.level]
+	m.level += 1
+	m.t = 0.0
+
+
+func _mound_rect(m: Dictionary) -> Rect2:
+	var r: float = maxf(m.radius, m.to.x) * 1.17 + HM_SPACING
+	return Rect2(m.center - Vector2(r, r), Vector2(r, r) * 2.0)
+
+
+# ---------------------------------------------------------------- animation
+
 func _process(delta: float) -> void:
-	if Engine.is_editor_hint() or holes.is_empty():
+	if Engine.is_editor_hint():
 		return
-	var dirty := Rect2()
-	var any := false
 	var finished: Array[Dictionary] = []
 	for h in holes:
 		if is_equal_approx(h.scale, h.target):
 			continue
 		h.scale = move_toward(h.scale, h.target, delta / maxf(h.duration, 0.01))
-		var r := _hole_rect(h)
-		dirty = r if not any else dirty.merge(r)
-		any = true
+		_update_wall(h)
+		_mark_collision(_hole_rect(h))
+		_features_dirty = true
 		if is_equal_approx(h.scale, h.target):
 			finished.append(h)
-	if not any:
-		return
 	for h in finished:
-		if h.target <= 0.0 and h.dynamic:
-			holes.erase(h)
-	_pending_dirty = dirty if not _has_pending else _pending_dirty.merge(dirty)
-	_has_pending = true
-	_hole_update_timer -= delta
-	# Throttle geometry rebuilds, but always apply the final state of a finished animation.
-	if _hole_update_timer > 0.0 and finished.is_empty():
-		return
-	_hole_update_timer = HOLE_UPDATE_INTERVAL
-	_has_pending = false
-	_update_region(_pending_dirty)
-	for h in finished:
-		if h.target > 0.0:
-			hole_opened.emit(h)
-		else:
+		if h.target <= 0.0:
+			# Layout holes stay listed (hidden) so a new round can reopen them.
+			if h.dynamic:
+				_free_wall(h.id)
+				holes.erase(h)
 			hole_closed.emit(h)
+		else:
+			hole_opened.emit(h)
+	var grown_rect := Rect2()
+	var grew := false
+	for m in mounds:
+		if m.t >= 1.0:
+			continue
+		m.t = minf(m.t + delta / MOUND_GROW_TIME, 1.0)
+		# Overshoots a little, like earth heaving up and settling.
+		var e := 1.0 - pow(1.0 - m.t, 3.0) + sin(m.t * PI) * 0.12
+		var v: Vector3 = m.from.lerp(m.to, e)
+		m.radius = v.x
+		m.height = v.y
+		m.sharp = clampf(v.z, 0.0, 1.0)
+		var r := _mound_rect(m)
+		grown_rect = r if not grew else grown_rect.merge(r)
+		grew = true
+		_features_dirty = true
+		if m.t >= 1.0:
+			mound_raised.emit(m)
+	if grew:
+		_mound_dirty = grown_rect if not _has_mound_dirty else _mound_dirty.merge(grown_rect)
+		_has_mound_dirty = true
+		ground_changed.emit(grown_rect)
+	if _features_dirty:
+		_upload_features()
+
+
+func _physics_process(_delta: float) -> void:
+	if Engine.is_editor_hint():
+		return
+	# Growing mounds update collision at half the physics rate; the last step always lands.
+	_mound_tick = not _mound_tick
+	if _has_mound_dirty and (_mound_tick or not _any_mound_growing()):
+		_has_mound_dirty = false
+		_mark_collision(_mound_dirty)
+	if _has_collision_dirty:
+		_has_collision_dirty = false
+		_refresh_collision(_collision_dirty)
+
+
+func _any_mound_growing() -> bool:
+	for m in mounds:
+		if m.t < 1.0:
+			return true
+	return false
+
+
+func _mark_collision(rect: Rect2) -> void:
+	_collision_dirty = rect if not _has_collision_dirty else _collision_dirty.merge(rect)
+	_has_collision_dirty = true
 
 
 # ---------------------------------------------------------------- noise helpers
@@ -278,36 +458,44 @@ static func _vnoise(p: Vector3) -> float:
 func rebuild() -> void:
 	if not config or not is_inside_tree():
 		return
-	_wobble_phases()
+	var randomized := config.randomize_layout and not Engine.is_editor_hint()
+	layout_seed = randi() if randomized else config.seed
+	_rng.seed = layout_seed
+	layout = ArenaLayout.shape(config, _rng, randomized)
+	_phase.resize(8)
+	for i in _phase.size():
+		_phase[i] = _rng.randf() * TAU
+	ArenaLayout.populate(layout, config, _rng, randomized, island_sdf)
+	if randomized:
+		print("Arena layout seed: %d" % layout_seed)
+
 	for c in get_children():
 		if c.has_meta("generated"):
 			remove_child(c)
 			c.queue_free()
-	_chunks.clear()
 	holes.clear()
-	for i in config.holes.size():
-		var hv := config.holes[i]
-		holes.append({"id": _next_hole_id, "center": Vector2(hv.x, hv.y), "radius": hv.z,
-			"scale": 1.0, "target": 1.0, "duration": 0.6, "ph0": _phase[8 + i * 2],
-			"ph1": _phase[9 + i * 2], "dynamic": false})
-		_next_hole_id += 1
+	mounds.clear()
+	_walls.clear()
+	_init_features()
+	_bake_sdf_texture()
 
-	# Marching-squares grid over the whole island.
-	_cs = config.cell_size
-	var ext := config.radius + Vector2(config.edge_wobble + 0.6, config.edge_wobble + 0.6)
+	# Grass top: marching squares over the island outline only (holes are cut by shaders).
+	_cs = layout.cell_size
+	var ext := layout.radius + Vector2(layout.edge_wobble + 0.6, layout.edge_wobble + 0.6)
 	_nx = int(ceil(ext.x * 2.0 / _cs))
 	_nz = int(ceil(ext.y * 2.0 / _cs))
 	_origin = -Vector2(_nx, _nz) * _cs * 0.5
 	_vals.resize((_nx + 1) * (_nz + 1))
-	_compute_vals(0, 0, _nx, _nz)
-
-	var outer_segments: Array[PackedVector2Array] = []
+	for j in _nz + 1:
+		for i in _nx + 1:
+			_vals[j * (_nx + 1) + i] = island_sdf(_origin + Vector2(i, j) * _cs)
+	var outline_segments: Array[PackedVector2Array] = []
 	for cj in ceili(float(_nz) / CHUNK_CELLS):
 		for ci in ceili(float(_nx) / CHUNK_CELLS):
-			_build_chunk(Vector2i(ci, cj), outer_segments)
+			_build_top_chunk(Vector2i(ci, cj), outline_segments)
 
-	# The island outline (largest loop of outer-boundary segments) becomes the outer shell.
-	var loops := _chain_loops(outer_segments)
+	# The island outline (largest loop) becomes the outer shell.
+	var loops := _chain_loops(outline_segments)
 	var outer_i := 0
 	for i in loops.size():
 		if absf(_loop_area(loops[i])) > absf(_loop_area(loops[outer_i])):
@@ -323,7 +511,11 @@ func rebuild() -> void:
 		_add_generated(mi)
 		_add_generated(_static_body("CliffBody", cliff_collision, LAYER_WALLS))
 
-	_bake_sdf_texture()
+	for hv in layout.holes:
+		_add_hole(Vector2(hv.x, hv.y), hv.z, 1.0, false, _rng.randf() * TAU, _rng.randf() * TAU)
+	_upload_features()
+	_build_collision()
+
 	obstacles.clear()
 	decor_footprints.clear()
 	# Dependent builders (Props, then Vegetation) run in child order.
@@ -333,85 +525,43 @@ func rebuild() -> void:
 	rebuilt.emit()
 
 
-func _compute_vals(i0: int, j0: int, i1: int, j1: int) -> void:
-	for j in range(maxi(j0, 0), mini(j1, _nz) + 1):
-		for i in range(maxi(i0, 0), mini(i1, _nx) + 1):
-			_vals[j * (_nx + 1) + i] = ground_sdf(_origin + Vector2(i, j) * _cs)
-
-
-## Recomputes the distance samples covering `rect` (world XZ), then rebuilds only the chunks
-## where a sample changed near the ground boundary (elsewhere the geometry is identical),
-## and refreshes the SDF texels.
-func _update_region(rect: Rect2) -> void:
-	var i0 := maxi(floori((rect.position.x - _origin.x) / _cs) - 1, 0)
-	var j0 := maxi(floori((rect.position.y - _origin.y) / _cs) - 1, 0)
-	var i1 := mini(ceili((rect.end.x - _origin.x) / _cs) + 1, _nx)
-	var j1 := mini(ceili((rect.end.y - _origin.y) / _cs) + 1, _nz)
-	var dirty := {}
-	for j in range(j0, j1 + 1):
-		for i in range(i0, i1 + 1):
-			var k := j * (_nx + 1) + i
-			var old := _vals[k]
-			var v := ground_sdf(_origin + Vector2(i, j) * _cs)
-			_vals[k] = v
-			if absf(v - old) > 1e-5 and (absf(v) < 0.6 or absf(old) < 0.6):
-				# A grid point is shared by up to four chunks.
-				for dj: int in [-1, 0]:
-					for di: int in [-1, 0]:
-						if i + di < 0 or j + dj < 0:
-							continue
-						var cc := Vector2i((i + di) / CHUNK_CELLS, (j + dj) / CHUNK_CELLS)
-						if cc.x * CHUNK_CELLS < _nx and cc.y * CHUNK_CELLS < _nz:
-							dirty[cc] = true
-	for c in dirty:
-		_build_chunk(c, null)
-	_update_sdf_texels(rect)
-
-
-## (Re)builds one chunk: its piece of grass top, the hole walls hanging from it, and their
-## collision. Outer-boundary segments are skipped (the shell owns the cliff); during a full
-## rebuild they are collected into `outer_segments`.
-func _build_chunk(c: Vector2i, outer_segments) -> void:
-	if _chunks.has(c):
-		for n in _chunks[c]:
-			remove_child(n)
-			n.queue_free()
-	var top := PackedVector3Array()
-	var segments: Array[PackedVector2Array] = []
-	_march_cells(c.x * CHUNK_CELLS, c.y * CHUNK_CELLS, mini((c.x + 1) * CHUNK_CELLS, _nx),
-		mini((c.y + 1) * CHUNK_CELLS, _nz), top, segments)
-	var walls := PackedVector3Array()
-	var wall_normals := PackedVector3Array()
-	var columns := {}
-	for seg in segments:
-		if _is_outer_boundary((seg[0] + seg[1]) * 0.5):
-			if outer_segments != null:
-				outer_segments.append(seg)
-		else:
-			_build_wall_segment(seg[0], seg[1], walls, wall_normals, columns)
-	var nodes: Array[Node] = []
-	if not top.is_empty() or not walls.is_empty():
-		var mesh := ArrayMesh.new()
-		_add_surface(mesh, top, _const_normals(top.size(), Vector3.UP))
-		_add_surface(mesh, walls, wall_normals)
-		for s in mesh.get_surface_count():
-			mesh.surface_set_material(s, terrain_material)
-		var mi := MeshInstance3D.new()
-		mi.name = "Chunk_%d_%d" % [c.x, c.y]
-		mi.mesh = mesh
-		nodes.append(mi)
-	if not top.is_empty():
-		nodes.append(_static_body("Floor_%d_%d" % [c.x, c.y], top, LAYER_FLOOR))
-	if not walls.is_empty():
-		nodes.append(_static_body("Walls_%d_%d" % [c.x, c.y], walls, LAYER_WALLS))
-	for n in nodes:
-		_add_generated(n)
-	_chunks[c] = nodes
-
-
 func _add_generated(n: Node) -> void:
 	n.set_meta("generated", true)
 	add_child(n)
+
+
+## One chunk of the grass top. UV2 = (1, 1): fully lifted by mounds, top surface.
+func _build_top_chunk(c: Vector2i, outline_segments: Array[PackedVector2Array]) -> void:
+	var top := PackedVector3Array()
+	_march_cells(c.x * CHUNK_CELLS, c.y * CHUNK_CELLS, mini((c.x + 1) * CHUNK_CELLS, _nx),
+		mini((c.y + 1) * CHUNK_CELLS, _nz), top, outline_segments)
+	if top.is_empty():
+		return
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = top
+	arrays[Mesh.ARRAY_NORMAL] = _filled3(top.size(), Vector3.UP)
+	var uv2 := PackedVector2Array()
+	uv2.resize(top.size())
+	uv2.fill(Vector2.ONE)
+	arrays[Mesh.ARRAY_TEX_UV2] = uv2
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	mesh.surface_set_material(0, terrain_material)
+	var mi := MeshInstance3D.new()
+	mi.name = "Top_%d_%d" % [c.x, c.y]
+	mi.mesh = mesh
+	# Mounds lift vertices in the shader: make culling and shadows aware of it.
+	var aabb := mesh.get_aabb()
+	mi.custom_aabb = AABB(Vector3(aabb.position.x, -0.5, aabb.position.z), Vector3(aabb.size.x, MOUND_LEVELS[-1].y + 1.0, aabb.size.z))
+	_add_generated(mi)
+
+
+static func _filled3(count: int, v: Vector3) -> PackedVector3Array:
+	var out := PackedVector3Array()
+	out.resize(count)
+	out.fill(v)
+	return out
 
 
 func _static_body(body_name: String, tris: PackedVector3Array, layer: int) -> StaticBody3D:
@@ -426,23 +576,6 @@ func _static_body(body_name: String, tris: PackedVector3Array, layer: int) -> St
 	cs.shape = shape
 	body.add_child(cs)
 	return body
-
-
-func _add_surface(mesh: ArrayMesh, verts: PackedVector3Array, normals: PackedVector3Array) -> void:
-	if verts.is_empty():
-		return
-	var arrays := []
-	arrays.resize(Mesh.ARRAY_MAX)
-	arrays[Mesh.ARRAY_VERTEX] = verts
-	arrays[Mesh.ARRAY_NORMAL] = normals
-	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-
-
-static func _const_normals(count: int, n: Vector3) -> PackedVector3Array:
-	var out := PackedVector3Array()
-	out.resize(count)
-	out.fill(n)
-	return out
 
 
 ## Appends triangle (a, b, c) wound so its front face points along `n`.
@@ -548,7 +681,7 @@ static func _loop_area(loop: PackedVector2Array) -> float:
 
 ## Wall profile rows: (depth below the top as a fraction of thickness, inward inset).
 func _wall_rows(is_outer: bool) -> Array[Vector2]:
-	var t := config.thickness
+	var t := layout.thickness
 	var rows: Array[Vector2] = [Vector2(0.0, 0.0), Vector2(0.11, 0.07)]
 	var n := 4
 	for k in range(1, n + 1):
@@ -574,41 +707,6 @@ func _wall_point(q: Vector2, g: Vector2, row: Vector2, row_index: int, is_outer:
 	return Vector3(flat.x, y, flat.y)
 
 
-## Hole wall: layered earth rows hanging from one boundary segment a-b.
-func _build_wall_segment(a: Vector2, b: Vector2, out: PackedVector3Array, normals: PackedVector3Array, columns: Dictionary) -> void:
-	var rows := _wall_rows(false)
-	var ca: Array = _wall_column(a, rows, columns)
-	var cb: Array = _wall_column(b, rows, columns)
-	var ga: Vector2 = ca[0]
-	var gb: Vector2 = cb[0]
-	var col_a: PackedVector3Array = ca[1]
-	var col_b: PackedVector3Array = cb[1]
-	var n := Vector3(ga.x + gb.x, 0.0, ga.y + gb.y)
-	for r in rows.size() - 1:
-		# Per-vertex normals follow the outline smoothly; the lip row tilts up a bit.
-		var tilt := 0.6 if r == 0 else 0.0
-		var na := Vector3(ga.x, tilt, ga.y).normalized()
-		var nb := Vector3(gb.x, tilt, gb.y).normalized()
-		var na1 := Vector3(ga.x, -0.1, ga.y).normalized()
-		var nb1 := Vector3(gb.x, -0.1, gb.y).normalized()
-		_quad(out, normals, col_a[r], col_b[r], col_b[r + 1], col_a[r + 1], na, nb, nb1, na1, n)
-
-
-## [gradient, wall points per row] for a boundary point; neighbouring segments share their
-## endpoints, so columns are cached per chunk build.
-func _wall_column(q: Vector2, rows: Array[Vector2], columns: Dictionary) -> Array:
-	var key := Vector2i((q * 4000.0).round())
-	if columns.has(key):
-		return columns[key]
-	var g := ground_gradient(q)
-	var col := PackedVector3Array()
-	for r in rows.size():
-		col.append(_wall_point(q, g, rows[r], r, false))
-	var entry := [g, col]
-	columns[key] = entry
-	return entry
-
-
 static func _quad(out: PackedVector3Array, normals: PackedVector3Array, a: Vector3, b: Vector3, c: Vector3, d: Vector3,
 		na: Vector3, nb: Vector3, nc: Vector3, nd: Vector3, facing: Vector3) -> void:
 	# Two triangles (a, b, c) and (a, c, d), flipped together if needed to face `facing`.
@@ -627,8 +725,8 @@ static func _quad(out: PackedVector3Array, normals: PackedVector3Array, a: Vecto
 ## The cliff part is also appended to `collision` (characters falling off the edge).
 func _add_outer_shell(mesh: ArrayMesh, outline: PackedVector2Array, collision: PackedVector3Array) -> void:
 	var n := outline.size()
-	var t0 := config.thickness
-	var depth := config.underside_depth
+	var t0 := layout.thickness
+	var depth := layout.underside_depth
 	var centre := Vector2.ZERO
 	for p in outline:
 		centre += p
@@ -706,33 +804,233 @@ static func _tri_indexed(st: SurfaceTool, a: int, b: int, c: int, flip: bool) ->
 		st.add_index(b)
 
 
+## A hole's wall: layered earth rows hanging from its outline (at full size, in the hole's
+## local space; the node is scaled on XZ while the hole opens/closes). UV2.x = how much each
+## row follows the mound height (1 at the rim, 0 at the bottom), so a hole dug through a
+## hill keeps a continuous wall. Faces point toward the hole's centre.
+func _build_hole_wall(h: Dictionary) -> MeshInstance3D:
+	var rows := _wall_rows(false)
+	var t := layout.thickness
+	var n := clampi(int(TAU * (h.radius + layout.hole_wobble) / 0.1), 24, 128)
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var c: Vector2 = h.center
+	var reach := 0.0
+	for r in rows.size():
+		for i in n:
+			var a := TAU * i / n
+			var dir := Vector2(cos(a), sin(a))
+			var rim: float = h.radius + layout.hole_wobble * (0.6 * sin(3.0 * a + h.ph0) + 0.4 * sin(5.0 * a + h.ph1))
+			var p := _wall_point(c + dir * rim, -dir, rows[r], r, false)
+			var local := Vector3(p.x - c.x, p.y, p.z - c.y)
+			reach = maxf(reach, Vector2(local.x, local.z).length())
+			st.set_uv2(Vector2(1.0 - rows[r].x / t, 0.0))
+			st.add_vertex(local)
+	# Same winding rule as the outer shell, facing inward.
+	var v0 := _wall_point(c + Vector2(h.radius, 0), Vector2.LEFT, rows[0], 0, false)
+	var a1 := TAU / n
+	var v1 := _wall_point(c + Vector2(cos(a1), sin(a1)) * h.radius, -Vector2(cos(a1), sin(a1)), rows[0], 0, false)
+	var v2 := _wall_point(c + Vector2(cos(a1), sin(a1)) * h.radius, -Vector2(cos(a1), sin(a1)), rows[1], 1, false)
+	var flip := (v1 - v0).cross(v2 - v0).dot(Vector3(-1, 0, 0)) < 0.0
+	for r in rows.size() - 1:
+		for i in n:
+			var ia := r * n + i
+			var ib := r * n + (i + 1) % n
+			_tri_indexed(st, ia, ib, ib + n, flip)
+			_tri_indexed(st, ia, ib + n, ia + n, flip)
+	st.generate_normals()
+	var mesh := st.commit()
+	mesh.surface_set_material(0, terrain_material)
+	var mi := MeshInstance3D.new()
+	mi.name = "HoleWall_%d" % h.id
+	mi.mesh = mesh
+	mi.position = Vector3(c.x, 0.0, c.y)
+	mi.custom_aabb = AABB(Vector3(-reach, -t - 0.3, -reach), Vector3(reach * 2.0, t + MOUND_LEVELS[-1].y + 0.6, reach * 2.0))
+	mi.set_instance_shader_parameter("self_hole_id", float(h.id))
+	return mi
+
+
+# ---------------------------------------------------------------- collision heightfield
+
+func _build_collision() -> void:
+	var ext := layout.radius + Vector2(layout.edge_wobble + 0.6, layout.edge_wobble + 0.6)
+	var cells := (ext * 2.0 / HM_SPACING).ceil()
+	_hm_cells = Vector2i(ceili(cells.x / HM_CHUNK) * HM_CHUNK, ceili(cells.y / HM_CHUNK) * HM_CHUNK)
+	_hm_origin = -Vector2(_hm_cells) * HM_SPACING * 0.5
+	# The island outline never changes: cache its distance (and the mound fade) per sample.
+	var w := _hm_cells.x + 1
+	_hm_island.resize(w * (_hm_cells.y + 1))
+	_hm_fade.resize(_hm_island.size())
+	for j in _hm_cells.y + 1:
+		for i in w:
+			var d := island_sdf(_hm_origin + Vector2(i, j) * HM_SPACING)
+			_hm_island[j * w + i] = d
+			_hm_fade[j * w + i] = smoothstep(ISLAND_FADE.x, ISLAND_FADE.y, -d)
+	_hm_shapes.clear()
+	_hm_data.clear()
+	var half := HM_CHUNK / 2
+	var empty := PackedFloat32Array()
+	empty.resize((HM_CHUNK + 1) * (HM_CHUNK + 1))
+	for cj in _hm_cells.y / HM_CHUNK:
+		for ci in _hm_cells.x / HM_CHUNK:
+			var body := StaticBody3D.new()
+			body.name = "Floor_%d_%d" % [ci, cj]
+			body.collision_layer = LAYER_FLOOR
+			body.collision_mask = 0
+			var shape := HeightMapShape3D.new()
+			shape.map_width = HM_CHUNK + 1
+			shape.map_depth = HM_CHUNK + 1
+			var cs := CollisionShape3D.new()
+			cs.shape = shape
+			# Uniform scale (heights are stored pre-divided): supported by every backend.
+			cs.scale = Vector3.ONE * HM_SPACING
+			var o := _hm_origin + Vector2(ci * HM_CHUNK + half, cj * HM_CHUNK + half) * HM_SPACING
+			cs.position = Vector3(o.x, 0.0, o.y)
+			body.add_child(cs)
+			_add_generated(body)
+			_hm_shapes[Vector2i(ci, cj)] = shape
+			_hm_data[Vector2i(ci, cj)] = empty.duplicate()
+	_has_collision_dirty = false
+	_refresh_collision(Rect2(_hm_origin, Vector2(_hm_cells) * HM_SPACING))
+
+
+## Re-samples the heightfield inside `rect` and re-uploads the chunks it touches. Each
+## sample is: NaN (a real gap) where the ground SDF exceeds GAP_SDF, else the mound height.
+## Only holes and mounds that reach `rect` are evaluated; the island part is cached.
+func _refresh_collision(rect: Rect2) -> void:
+	if _hm_shapes.is_empty():
+		return
+	var i0 := clampi(floori((rect.position.x - _hm_origin.x) / HM_SPACING), 0, _hm_cells.x)
+	var j0 := clampi(floori((rect.position.y - _hm_origin.y) / HM_SPACING), 0, _hm_cells.y)
+	var i1 := clampi(ceili((rect.end.x - _hm_origin.x) / HM_SPACING), 0, _hm_cells.x)
+	var j1 := clampi(ceili((rect.end.y - _hm_origin.y) / HM_SPACING), 0, _hm_cells.y)
+	# Only the sign of (ground SDF - GAP_SDF) matters here, so a hole is skipped for every
+	# sample farther than its outer rim + GAP_SDF (no trig).
+	var near_holes: Array[Dictionary] = []
+	var hole_reach := PackedFloat32Array()
+	for h in holes:
+		var reach: float = (h.radius + layout.hole_wobble) * h.scale + GAP_SDF
+		if h.scale > 0.02 and rect.grow(reach).has_point(h.center):
+			near_holes.append(h)
+			hole_reach.append(reach * reach)
+	# Per mound: [cached distances, origin i, origin j, width, height, 1/radius, height, sharp]
+	# (plain locals in the hot loop: GDScript dictionary lookups are slow).
+	var near_mounds: Array[Array] = []
+	for m in mounds:
+		if m.height > 0.0 and m.radius > 0.0 and rect.grow(m.radius * 1.17).has_point(m.center):
+			var cache := _mound_cache(m)
+			var a0: Vector2i = cache.a0
+			var size: Vector2i = cache.size
+			near_mounds.append([cache.dist, a0.x, a0.y, size.x, size.y, 1.0 / m.radius, m.height, m.sharp])
+	var w := _hm_cells.x + 1
+	var inv := 1.0 / HM_SPACING
+	var n := HM_CHUNK + 1
+	var c0 := Vector2i(maxi((i0 - 1) / HM_CHUNK, 0), maxi((j0 - 1) / HM_CHUNK, 0))
+	var c1 := Vector2i(mini(i1 / HM_CHUNK, _hm_cells.x / HM_CHUNK - 1), mini(j1 / HM_CHUNK, _hm_cells.y / HM_CHUNK - 1))
+	for cj in range(c0.y, c1.y + 1):
+		for ci in range(c0.x, c1.x + 1):
+			var c := Vector2i(ci, cj)
+			var data: PackedFloat32Array = _hm_data[c]
+			var bi := ci * HM_CHUNK
+			var bj := cj * HM_CHUNK
+			# Samples on chunk borders are evaluated once per chunk sharing them (cheap).
+			for j in range(maxi(j0, bj), mini(j1, bj + HM_CHUNK) + 1):
+				for i in range(maxi(i0, bi), mini(i1, bi + HM_CHUNK) + 1):
+					var k := j * w + i
+					var d := _hm_island[k]
+					if not near_holes.is_empty():
+						var p := _hm_origin + Vector2(i, j) * HM_SPACING
+						for hi in near_holes.size():
+							if d > GAP_SDF:
+								break
+							if p.distance_squared_to(near_holes[hi].center) < hole_reach[hi]:
+								d = maxf(d, -hole_sdf(p, near_holes[hi]))
+					var v := NAN
+					if d <= GAP_SDF:
+						var best := 0.0
+						for md in near_mounds:
+							var li: int = i - md[1]
+							var lj: int = j - md[2]
+							if li < 0 or lj < 0 or li >= md[3] or lj >= md[4]:
+								continue
+							var x: float = md[0][lj * md[3] + li] * md[5]
+							if x < 1.0:
+								var sm := (1.0 - x * x) * (1.0 - x * x)
+								best = maxf(best, md[6] * lerpf(sm, (1.0 - x) * sqrt(1.0 - x), md[7]))
+						v = best * _hm_fade[k] * inv
+					data[(j - bj) * n + (i - bi)] = v
+			_hm_data[c] = data
+			(_hm_shapes[c] as HeightMapShape3D).map_data = data
+
+
+## Per heightfield sample around mound `m`: its distance to the centre divided by the
+## outline wobble at that angle. While a mound grows only its scale changes, so this is
+## computed once per level and growth steps only need x = dist / radius.
+func _mound_cache(m: Dictionary) -> Dictionary:
+	var cache: Dictionary = m.get("cache", {})
+	if cache.get("level", -1) == m.level:
+		return cache
+	# Covers the largest outline of this level, overshoot included.
+	var reach: float = maxf(m.to.x, m.radius) * 1.17 * 1.15 + HM_SPACING
+	var a0 := Vector2i(floori((m.center.x - reach - _hm_origin.x) / HM_SPACING), floori((m.center.y - reach - _hm_origin.y) / HM_SPACING))
+	var size := Vector2i(ceili(reach * 2.0 / HM_SPACING) + 2, ceili(reach * 2.0 / HM_SPACING) + 2)
+	var dist := PackedFloat32Array()
+	dist.resize(size.x * size.y)
+	for cj in size.y:
+		for ci in size.x:
+			var d: Vector2 = _hm_origin + Vector2(a0.x + ci, a0.y + cj) * HM_SPACING - m.center
+			var a := atan2(d.y, d.x)
+			dist[cj * size.x + ci] = d.length() / (1.0 + 0.1 * sin(3.0 * a + m.ph0) + 0.06 * sin(5.0 * a + m.ph1))
+	cache = {"level": m.level, "a0": a0, "size": size, "dist": dist}
+	m.cache = cache
+	return cache
+
+
+# ---------------------------------------------------------------- shader data
+
+## Holes and mounds for the shaders (see toon.gdshaderinc): one texel per item per row.
+##   row 0: hole (center.x, center.z, radius, scale)   row 1: (ph0, ph1, wobble, id)
+##   row 2: mound (center.x, center.z, radius, height) row 3: (ph0, ph1, sharpness, 0)
+func _init_features() -> void:
+	_features_image = Image.create_empty(maxi(MAX_HOLES, MAX_MOUNDS), 4, false, Image.FORMAT_RGBAF)
+	_features_texture = ImageTexture.create_from_image(_features_image)
+	RenderingServer.global_shader_parameter_set("arena_features", _features_texture)
+	_features_dirty = true
+
+
+func _upload_features() -> void:
+	_features_dirty = false
+	if not _features_image:
+		return
+	var nh := mini(holes.size(), MAX_HOLES)
+	for i in nh:
+		var h := holes[i]
+		_features_image.set_pixel(i, 0, Color(h.center.x, h.center.y, h.radius, h.scale))
+		_features_image.set_pixel(i, 1, Color(h.ph0, h.ph1, layout.hole_wobble, h.id))
+	var nm := mini(mounds.size(), MAX_MOUNDS)
+	for i in nm:
+		var m := mounds[i]
+		_features_image.set_pixel(i, 2, Color(m.center.x, m.center.y, m.radius, m.height))
+		_features_image.set_pixel(i, 3, Color(m.ph0, m.ph1, m.sharp, 0.0))
+	_features_texture.update(_features_image)
+	RenderingServer.global_shader_parameter_set("arena_hole_count", nh)
+	RenderingServer.global_shader_parameter_set("arena_mound_count", nm)
+	RenderingServer.global_shader_parameter_set("arena_island_fade", ISLAND_FADE)
+
+
+## Static island outline distance (R and G), sampled by shaders.
 func _bake_sdf_texture() -> void:
-	var ext := config.radius + Vector2(config.edge_wobble + 1.0, config.edge_wobble + 1.0)
+	var ext := layout.radius + Vector2(layout.edge_wobble + 1.0, layout.edge_wobble + 1.0)
 	var res := 6.0 # texels per unit
 	var w := int(ext.x * 2.0 * res)
 	var h := int(ext.y * 2.0 * res)
 	sdf_rect = Rect2(-ext, ext * 2.0)
 	_sdf_image = Image.create_empty(w, h, false, Image.FORMAT_RGF)
-	_fill_sdf_texels(0, 0, w, h)
+	for j in h:
+		for i in w:
+			var p := sdf_rect.position + Vector2((i + 0.5) / w, (j + 0.5) / h) * sdf_rect.size
+			var d := island_sdf(p)
+			_sdf_image.set_pixel(i, j, Color(d, d, 0.0))
 	sdf_texture = ImageTexture.create_from_image(_sdf_image)
 	RenderingServer.global_shader_parameter_set("arena_sdf", sdf_texture)
 	RenderingServer.global_shader_parameter_set("arena_sdf_rect", Vector4(sdf_rect.position.x, sdf_rect.position.y, sdf_rect.size.x, sdf_rect.size.y))
-
-
-func _fill_sdf_texels(x0: int, y0: int, x1: int, y1: int) -> void:
-	var w := _sdf_image.get_width()
-	var h := _sdf_image.get_height()
-	for j in range(maxi(y0, 0), mini(y1, h)):
-		for i in range(maxi(x0, 0), mini(x1, w)):
-			var p := sdf_rect.position + Vector2((i + 0.5) / w, (j + 0.5) / h) * sdf_rect.size
-			_sdf_image.set_pixel(i, j, Color(ground_sdf(p), island_sdf(p), 0.0))
-
-
-func _update_sdf_texels(rect: Rect2) -> void:
-	if not _sdf_image:
-		return
-	var sz := Vector2(_sdf_image.get_size())
-	var a := ((rect.position - sdf_rect.position) / sdf_rect.size * sz).floor()
-	var b := ((rect.end - sdf_rect.position) / sdf_rect.size * sz).ceil()
-	_fill_sdf_texels(int(a.x) - 1, int(a.y) - 1, int(b.x) + 1, int(b.y) + 1)
-	sdf_texture.update(_sdf_image)

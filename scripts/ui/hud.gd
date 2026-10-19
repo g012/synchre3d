@@ -104,9 +104,9 @@ func set_score(a: int, b: int) -> void:
 func set_mode(two_player: bool) -> void:
 	_mode.text = "2P LOCAL" if two_player else "1P VS CPU"
 	if two_player:
-		_hint.text = "PADS 1+2 / P1 WASD IJKL SPACE / P2 ARROWS NUMPAD 2468 0   BACK/TAB 1P"
+		_hint.text = "PADS 1+2 / P1 WASD IJKL SPACE E / P2 ARROWS NUM 2468 0 .   BACK/TAB 1P"
 	else:
-		_hint.text = "STICK/WASD MOVE  A B X Y (K L J I) CHANT  RT/SPACE JUMP  BACK/TAB 2P  START/R"
+		_hint.text = "STICK/WASD MOVE  ABXY (KLJI) CHANT  RT/SPACE JUMP  RB/E SHOVE  BACK/TAB 2P"
 
 
 ## One rhythm readout per human caster: P1 bottom-left, P2 bottom-right.

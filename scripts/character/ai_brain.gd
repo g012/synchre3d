@@ -109,6 +109,9 @@ func _danger(p: Vector2) -> float:
 
 func _obstacle_penalty(p: Vector2) -> float:
 	var pen := 0.0
+	# Slopes too steep to climb (mountain flanks) block like props.
+	if not arena.mounds.is_empty() and arena.height_gradient(p).length() > 0.9:
+		pen += 1.5
 	for o in arena.obstacles:
 		var d := p.distance_to(Vector2(o.x, o.y)) - o.z - 0.35
 		if d < 0.0:

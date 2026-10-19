@@ -22,6 +22,14 @@ global uniform float pit_depth;
 // Baked arena distance field: R = walkable ground (negative = solid), G = island outline.
 global uniform sampler2D arena_sdf : filter_linear, repeat_disable;
 global uniform vec4 arena_sdf_rect;
+// Runtime holes and mounds (written by Arena._upload_features, one texel per item):
+//   row 0: hole (center.x, center.z, radius, scale)   row 1: (ph0, ph1, wobble, id)
+//   row 2: mound (center.x, center.z, radius, height) row 3: (ph0, ph1, sharpness, 0)
+global uniform sampler2D arena_features : filter_nearest, repeat_disable;
+global uniform int arena_hole_count;
+global uniform int arena_mound_count;
+// Mounds flatten out between these distances inside the island edge.
+global uniform vec2 arena_island_fade;
 
 // Material ids written to ROUGHNESS so the post-process can tell surfaces apart
 // (decoded in post_outline.gdshader).
@@ -88,6 +96,83 @@ float world_y_floor() {
 
 vec2 arena_sdf_at(vec2 xz) {
 	return texture(arena_sdf, (xz - arena_sdf_rect.xy) / arena_sdf_rect.zw).rg;
+}
+
+// Signed distance to hole `i`'s outline (negative inside). Mirrors Arena.hole_sdf().
+float arena_hole_dist(vec2 xz, int i) {
+	vec4 a = texelFetch(arena_features, ivec2(i, 0), 0);
+	if (a.w <= 0.02) {
+		return 1e3;
+	}
+	vec4 b = texelFetch(arena_features, ivec2(i, 1), 0);
+	vec2 d = xz - a.xy;
+	float l = length(d);
+	float reach = (a.z + b.z) * a.w;
+	if (l > reach + 0.05) {
+		return l - reach;
+	}
+	float ang = atan(d.y, d.x);
+	return l - (a.z + b.z * (0.6 * sin(3.0 * ang + b.x) + 0.4 * sin(5.0 * ang + b.y))) * a.w;
+}
+
+// Smallest hole distance at `xz`, ignoring the hole whose id is `skip_id` (-1: none).
+float arena_holes_dist(vec2 xz, float skip_id) {
+	float m = 1e3;
+	for (int i = 0; i < arena_hole_count; i++) {
+		if (abs(texelFetch(arena_features, ivec2(i, 1), 0).w - skip_id) < 0.5) {
+			continue;
+		}
+		m = min(m, arena_hole_dist(xz, i));
+	}
+	return m;
+}
+
+// Walkable ground SDF (negative = solid): island outline minus holes. Mirrors Arena.ground_sdf().
+float arena_ground_sdf(vec2 xz) {
+	return max(arena_sdf_at(xz).g, -arena_holes_dist(xz, -1.0));
+}
+
+// Ground height and slope at `xz`: vec3(height, dh/dx, dh/dz). Mirrors Arena.height_at();
+// the slope is the analytic radial derivative of the tallest mound (normals only).
+vec3 arena_height(vec2 xz) {
+	if (arena_mound_count == 0) {
+		return vec3(0.0);
+	}
+	float best = 0.0;
+	vec2 grad = vec2(0.0);
+	for (int i = 0; i < arena_mound_count; i++) {
+		vec4 a = texelFetch(arena_features, ivec2(i, 2), 0);
+		vec2 d = xz - a.xy;
+		float l = length(d);
+		if (a.w <= 0.0 || l >= a.z * 1.17) {
+			continue;
+		}
+		vec4 b = texelFetch(arena_features, ivec2(i, 3), 0);
+		float ang = atan(d.y, d.x);
+		float rr = a.z * (1.0 + 0.1 * sin(3.0 * ang + b.x) + 0.06 * sin(5.0 * ang + b.y));
+		float x = l / rr;
+		if (x >= 1.0) {
+			continue;
+		}
+		float s = (1.0 - x * x) * (1.0 - x * x);
+		float ds = -4.0 * x * (1.0 - x * x);
+		float p = pow(1.0 - x, 1.5);
+		float dp = -1.5 * sqrt(1.0 - x);
+		float h = a.w * mix(s, p, b.z);
+		if (h > best) {
+			best = h;
+			grad = a.w * mix(ds, dp, b.z) / rr * d / max(l, 1e-4);
+		}
+	}
+	float fade = smoothstep(arena_island_fade.x, arena_island_fade.y, -arena_sdf_at(xz).g);
+	return vec3(best, grad) * fade;
+}
+
+// Lighting normal for the ground at slope `grad` (dh/dx, dh/dz). The slope is exaggerated so
+// gentle hills already cross a toon band on their shaded flank (otherwise a 40 deg grassy
+// hill shades like flat lawn and its shape does not read).
+vec3 arena_light_normal(vec2 grad) {
+	return normalize(vec3(-grad.x * 2.4, 1.0, -grad.y * 2.4));
 }
 
 // 1 when a point is inside the island footprint but below the grass, i.e. down a hole.

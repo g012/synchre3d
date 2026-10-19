@@ -12,9 +12,25 @@ extends Resource
 @export var thickness := 1.5
 ## Extra depth of the rocky underside hanging below the slab.
 @export var underside_depth := 4.5
-## Marching-squares resolution: smaller = smoother hole edges, more triangles.
-@export var cell_size := 0.16
+## Marching-squares resolution of the island outline (holes are cut per pixel by shaders).
+@export var cell_size := 0.2
 @export var seed := 11
+
+@export_group("Layout")
+## Linear scale applied to the island (2 = twice as wide and deep, 4x the area).
+@export var size_scale := 2.0
+## In game, generate a fresh random layout (island shape, holes, props, spawns) on every
+## launch. When off (and always in the editor) the arrays below are used as authored,
+## scaled by `size_scale`.
+@export var randomize_layout := true
+## Random layout: count ranges (min, max) of each feature, and the hole radius range.
+@export var hole_count := Vector2i(11, 15)
+@export var hole_radius := Vector2(0.6, 1.25)
+@export var tree_count := Vector2i(8, 11)
+@export var bush_count := Vector2i(6, 9)
+@export var rock_count := Vector2i(9, 13)
+@export var stump_count := Vector2i(3, 5)
+@export var mushroom_count := Vector2i(5, 8)
 
 @export_group("Holes")
 ## One entry per hole: (centre x, centre z, radius).

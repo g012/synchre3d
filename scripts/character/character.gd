@@ -3,9 +3,9 @@ extends CharacterBody3D
 ## A pushable arena fighter: screen-relative movement with inertia, a short-range push,
 ## knockback with friction, and falling when the ground under it disappears.
 ##
-## Support is tested with a ray against the real floor collision (holes are gaps in it):
-## as soon as the character's centre is over a gap it stops colliding with the floor and
-## drops, constrained only by the hole walls. Animation is fully procedural on the separate
+## Support follows the arena's exact ground outline (the same function the shaders cut
+## holes with): as soon as a grounded character's centre is over a hole or off the island
+## it stops colliding with the floor and drops, kept inside the hole it fell into. Animation is fully procedural on the separate
 ## rigid parts of the Blender model (body, head, eyes, hands, feet).
 
 signal pushed(attacker: ArenaCharacter, target: ArenaCharacter, hit: bool)
@@ -68,6 +68,8 @@ var _cooldown := 0.0
 var _push_resolved := false
 var _hitstop := 0.0
 var _fall_time := 0.0
+## The hole being fallen into ({} when falling off the outer edge).
+var _fall_hole := {}
 
 # Visual / animation
 var _visual: Node3D
@@ -92,7 +94,6 @@ var cast_level := 0.0
 var _cast_pose := 0.0
 var _cast_bob := 0.0
 
-const FLOOR_MASK := Arena.LAYER_FLOOR
 const GROUND_MASK := Arena.LAYER_FLOOR | Arena.LAYER_OBSTACLES
 const FALL_MASK := Arena.LAYER_WALLS
 const RADIUS := 0.36
@@ -102,6 +103,8 @@ func _ready() -> void:
 	collision_layer = Arena.LAYER_CHARACTERS
 	collision_mask = GROUND_MASK
 	floor_snap_length = 0.2
+	# Hills (up to ~43 deg) are walkable; mountain flanks are not.
+	floor_max_angle = deg_to_rad(47.0)
 	_build_visual()
 
 
@@ -222,7 +225,8 @@ func _physics_process(delta: float) -> void:
 			velocity.x *= exp(-1.2 * delta)
 			velocity.z *= exp(-1.2 * delta)
 			move_and_slide()
-			if global_position.y < -arena.config.thickness - 1.6 or _fall_time > 2.5:
+			_keep_inside_hole()
+			if global_position.y < arena.height_at(_xz()) - arena.layout.thickness - 1.6 or _fall_time > 2.5:
 				_set_state(State.OUT)
 				_visual.visible = false
 				eliminated.emit(self)
@@ -264,8 +268,10 @@ func _turn_towards(dir: Vector3, delta: float) -> void:
 func _apply_gravity_and_move(delta: float) -> void:
 	# Support is only checked at ground level: a jumping character flies over holes and
 	# only drops into one if it comes down over it.
-	var grounded_height := global_position.y <= 0.02 and velocity.y <= 0.0
-	if grounded_height and not _has_support():
+	var p := _xz()
+	var grounded := velocity.y <= 0.0 and (is_on_floor() or global_position.y <= arena.height_at(p) + 0.05)
+	# Safety net: a body that ever ends up well under the ground counts as fallen.
+	if (grounded and not arena.is_over_ground(p)) or global_position.y < arena.height_at(p) - 0.8:
 		_start_fall()
 		return
 	if not is_on_floor():
@@ -305,17 +311,34 @@ func cast_pulse() -> void:
 	_squash_vel += 2.5
 
 
-## True while the floor collision exists right under the character's centre.
-func _has_support() -> bool:
-	var space := get_world_3d().direct_space_state
-	var from := global_position + Vector3.UP * 0.4
-	var q := PhysicsRayQueryParameters3D.create(from, global_position + Vector3.DOWN * 0.35, FLOOR_MASK)
-	return not space.intersect_ray(q).is_empty()
+func _xz() -> Vector2:
+	return Vector2(global_position.x, global_position.z)
+
+
+## While falling down a hole the walls hold the body in (they have no collision: the hole
+## outline is analytic and may be animating).
+func _keep_inside_hole() -> void:
+	if _fall_hole.is_empty() or _fall_hole.scale <= 0.02:
+		return
+	var c: Vector2 = _fall_hole.center
+	var d := _xz() - c
+	var limit: float = maxf(_fall_hole.radius * _fall_hole.scale - RADIUS * 0.8, 0.0)
+	if d.length() > limit:
+		var n := d.normalized() if d.length() > 0.0001 else Vector2.RIGHT
+		# Eased in over a few ticks so the body slides against the wall instead of snapping.
+		var q := c + n * lerpf(d.length(), limit, 0.35)
+		global_position.x = q.x
+		global_position.z = q.y
+		var out := Vector2(velocity.x, velocity.z).dot(n)
+		if out > 0.0:
+			velocity.x -= n.x * out
+			velocity.z -= n.y * out
 
 
 func _start_fall() -> void:
 	_set_state(State.FALLING)
 	_fall_time = 0.0
+	_fall_hole = arena.hole_at(_xz())
 	collision_mask = FALL_MASK
 	velocity.y = minf(velocity.y, 0.0) - 1.0
 	_squash_vel -= 5.0

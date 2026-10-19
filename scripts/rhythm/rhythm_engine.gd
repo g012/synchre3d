@@ -7,12 +7,18 @@ extends RefCounted
 ##
 ## * Tempo: four consecutive taps whose three intervals AND the wait after the last tap all
 ##   lie within +-20% of their average lock the tempo; BPM = round(3 * 60 / sum(intervals)).
-##   It stays fixed until BLANK_DURATION (6) beats pass without a tap, which clears everything.
+##   It stays fixed until `blank_beats` beats pass without a tap, which clears everything
+##   (the original used 6 = BLANK_DURATION; Synchre's arena keeps the tempo twice as long).
 ## * Patterns fill a measure whose end is "now"; note i must fall within +-20% of its own
 ##   duration around its slot; the last note is the newest unconsumed tap. Matched taps are
 ##   consumed so they cannot be reused.
 ##
 ## Differences, all deliberate:
+## * A tempo can also be set by the opening notes of a spell (`tempo_from_openings`): when
+##   the newest OPENING_NOTES+ taps play a spell's first syllables with its rhythm (each
+##   note within the usual +-20% of its own duration around a least-squares beat fit), the
+##   tempo locks right away at that beat, aligned with the notes, and the
+##   incantation simply continues. No count-in is needed; the 4-tap count-in still works.
 ## * Time is injected (press/advance take timestamps in seconds) and every rule is solved in
 ##   closed form instead of being sampled once per rendered frame. The result is exactly the
 ##   original's behavior at infinite frame rate: it no longer depends on FPS or physics ticks,
@@ -30,7 +36,12 @@ signal progress_changed(pattern: RhythmPattern, step: int, time: float)
 signal incantation_failed(pattern: RhythmPattern, step: int, reason: String, time: float)
 signal pattern_matched(pattern: RhythmPattern, time: float)
 
+## The original's silence (in beats) that clears the tempo.
 const BLANK_DURATION := 6
+## Notes of a spell needed to infer the tempo from it (2 intervals: a real rhythm).
+const OPENING_NOTES := 3
+## Tempo range accepted from a spell opening.
+const OPENING_BPM := Vector2(40.0, 240.0)
 const TOLERANCE := 0.2
 const DEFAULT_BPM_R := 999.0
 ## Within this fraction of a note's tolerance a tap is judged "perfect".
@@ -40,6 +51,10 @@ const MAX_NOTES := 64
 enum Rating { NONE, PERFECT, EARLY, LATE, MISS }
 
 var patterns: Array[RhythmPattern] = []
+## Beats of silence after which the tempo is dropped.
+var blank_beats := BLANK_DURATION * 2
+## Lock the tempo from a spell's opening notes (see class doc).
+var tempo_from_openings := true
 var bpm := 0.0
 var bpm_r := DEFAULT_BPM_R
 var has_blanked := true
@@ -77,7 +92,7 @@ func press(instr: int, time: float) -> void:
 	if notes.size() > MAX_NOTES:
 		notes.remove_at(0)
 	note_pressed.emit(instr, time)
-	if bpm <= 0.0:
+	if bpm <= 0.0 and not (tempo_from_openings and _lock_from_opening(time)):
 		return
 	var matched := _match_patterns(time)
 	_track_progress(time, matched)
@@ -104,7 +119,7 @@ func advance(time: float) -> void:
 				next_t = lock_t
 				kind = "lock"
 		if bpm > 0.0 and not notes.is_empty():
-			var blank_t: float = notes[-1].t + BLANK_DURATION * beat_duration()
+			var blank_t: float = notes[-1].t + blank_beats * beat_duration()
 			if blank_t < next_t:
 				next_t = blank_t
 				kind = "blank"
@@ -186,6 +201,68 @@ func _lock_tempo(time: float) -> void:
 	has_blanked = false
 	grid_origin = notes[n - 1].t
 	tempo_locked.emit(bpm, time)
+
+
+## Tries to infer the tempo from the newest taps playing the start of a spell. Picks the
+## longest matching opening; the beat comes from a least-squares fit of tap times against
+## the notes' onsets, rounded to whole BPM like the count-in, then every note must sit
+## within its usual tolerance (checked with the same `_fit` as recognition).
+func _lock_from_opening(time: float) -> bool:
+	var best_k := 0
+	var best_bpm := 0.0
+	var best_origin := 0.0
+	for pattern in patterns:
+		if pattern.syllables.is_empty():
+			continue
+		for k in range(mini(pattern.size(), notes.size()), OPENING_NOTES - 1, -1):
+			if k <= best_k:
+				break
+			var first := notes.size() - k
+			var idx: Array[int] = []
+			var ok := true
+			for j in k:
+				var note: Dictionary = notes[first + j]
+				if note.consumed or note.instr != pattern.syllables[j]:
+					ok = false
+					break
+				idx.append(first + j)
+			if not ok:
+				continue
+			var mx := 0.0
+			var my := 0.0
+			for j in k:
+				mx += pattern.onset(j)
+				my += notes[idx[j]].t
+			mx /= k
+			my /= k
+			var sxy := 0.0
+			var sxx := 0.0
+			for j in k:
+				var dx := pattern.onset(j) - mx
+				sxy += dx * (notes[idx[j]].t - my)
+				sxx += dx * dx
+			if sxx <= 0.0 or sxy <= 0.0:
+				continue
+			var beat := sxy / sxx
+			var candidate := floorf(0.5 + 60.0 / beat)
+			if candidate < OPENING_BPM.x or candidate > OPENING_BPM.y:
+				continue
+			_set_bpm(candidate)
+			var fit := _fit(pattern, idx, k, k == pattern.size())
+			_set_bpm(0.0)
+			if fit.is_empty():
+				continue
+			best_k = k
+			best_bpm = candidate
+			best_origin = (fit[0] + fit[1]) * 0.5
+			break
+	if best_k == 0:
+		return false
+	_set_bpm(best_bpm)
+	has_blanked = false
+	grid_origin = best_origin
+	tempo_locked.emit(bpm, time)
+	return true
 
 
 func _set_bpm(value: float) -> void:

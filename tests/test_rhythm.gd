@@ -17,7 +17,11 @@ func _init() -> void:
 	test_tempo_lock_time_and_bpm()
 	test_tempo_tolerance_boundaries()
 	test_no_lock_before_wait()
-	test_blank_after_six_beats()
+	test_blank_after_twelve_beats()
+	test_opening_sets_tempo()
+	test_opening_each_spell_any_tempo()
+	test_opening_rejects_wrong_rhythm_or_buttons()
+	test_opening_then_tempo_kept()
 	test_tempo_change_after_blank()
 	test_push_spell_matches()
 	test_spell_at_other_tempos()
@@ -132,13 +136,87 @@ func test_no_lock_before_wait() -> void:
 	check(e.bpm == 0.0, "early 5th tap prevents the lock")
 
 
-func test_blank_after_six_beats() -> void:
+func test_blank_after_twelve_beats() -> void:
 	var e := make_engine()
 	count_in(e, 0.0, 0.5)
-	e.advance(1.5 + 3.0 - 0.001)
-	check(e.bpm == 120.0, "tempo kept just before 6 beats of silence")
+	e.advance(1.5 + 6.0 - 0.001)
+	check(e.bpm == 120.0, "tempo kept just before 12 beats of silence")
+	e.advance(1.5 + 6.0 + 0.001)
+	check(e.bpm == 0.0 and has("lost @7.5000"), "tempo lost after 12 beats of silence: %s" % [_log])
+	# The original's 6 beats are still available.
+	e = make_engine()
+	e.blank_beats = RhythmEngine.BLANK_DURATION
+	count_in(e, 0.0, 0.5)
 	e.advance(1.5 + 3.0 + 0.001)
-	check(e.bpm == 0.0 and has("lost @4.5000"), "tempo lost after 6 beats of silence: %s" % [_log])
+	check(e.bpm == 0.0 and has("lost @4.5000"), "blank_beats = 6 reproduces the original: %s" % [_log])
+
+
+# ------------------------------------------------------------------------------ tempo from a spell opening
+
+func test_opening_sets_tempo() -> void:
+	# ABXYA at 100 BPM with no count-in: the tempo locks on the 3rd note (X) and it casts.
+	# (A note's beats are the time before it, so ABX sits at beats 1, 1.5, 2 of the measure.)
+	var e := make_engine()
+	var beat := 0.6
+	var p: RhythmPattern = e.patterns[0]
+	play(e, p, 1.0, beat)
+	check(has("lock 100 @%.4f" % (1.0 + p.onset(2) * beat)), "push opening locks 100 bpm on its 3rd note: %s" % [_log])
+	check(has("match push"), "and the incantation completes: %s" % [_log])
+	check(is_equal_approx(fposmod(e.grid_origin - 1.0, beat), 0.0), "beat grid aligned with the notes (%s)" % e.grid_origin)
+
+
+func test_opening_each_spell_any_tempo() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 5
+	var bad := []
+	for bpm: float in [62.0, 75.0, 90.0, 118.0, 150.0, 190.0]:
+		for pi in 3:
+			var e := make_engine()
+			var p: RhythmPattern = e.patterns[pi]
+			var beat: float = 60.0 / bpm
+			# Human-ish timing: each note off by up to 30% of its own tolerance.
+			var offsets := {}
+			for k in p.size():
+				offsets[k] = rng.randf_range(-0.3, 0.3) * 0.2 * p.beats[k] * beat
+			offsets[0] = 0.0
+			play(e, p, 3.0, beat, offsets)
+			# The inferred tempo is as precise as the player (a few % with sloppy timing).
+			if not has("match %s" % p.pattern_name) or absf(e.bpm - bpm) > bpm * 0.06:
+				bad.append("%s@%d -> %s" % [p.pattern_name, bpm, _log])
+	check(bad.is_empty(), "every spell casts from a cold start at 62-190 bpm: %s" % [bad])
+
+
+func test_opening_rejects_wrong_rhythm_or_buttons() -> void:
+	var e := make_engine()
+	# A B X with intervals 0.25 s then 0.75 s: push wants two equal half beats.
+	var times := [0.0, 0.25, 1.0]
+	for k in 3:
+		e.press([A, B, X][k], times[k])
+	check(e.bpm == 0.0, "push buttons with the wrong rhythm do not set a tempo")
+	e = make_engine()
+	var beat := 0.5
+	for k in 3:
+		e.press([A, X, B][k], 5.0 + e.patterns[0].onset(k) * beat)
+	check(e.bpm == 0.0, "push rhythm with the wrong buttons does not set a tempo")
+	e = make_engine()
+	e.tempo_from_openings = false
+	play(e, e.patterns[0], 1.0, 0.6)
+	check(e.bpm == 0.0 and not has("match"), "openings can be disabled (count-in only, like the original)")
+
+
+func test_opening_then_tempo_kept() -> void:
+	# After a cold cast the tempo stays for the next spell, played on the grid.
+	var e := make_engine()
+	var beat := 0.5
+	play(e, e.patterns[1], 0.0, beat)
+	var m := 0.0 + e.patterns[1].length() * beat
+	play(e, e.patterns[0], m + 2.0 * beat, beat)
+	var n := 0
+	for l in _log:
+		if l.begins_with("match"):
+			n += 1
+	check(n == 2 and _log.count("lock 120 @%.4f" % (e.patterns[1].onset(2) * beat)) == 1,
+		"open pit cold, then push on the kept tempo: %s" % [_log])
 
 
 func test_tempo_change_after_blank() -> void:
@@ -249,6 +327,7 @@ func test_timeout_and_granularity() -> void:
 		while t < m + 6.0:
 			t += step
 			e.advance(t)
+		e.advance(m + 12.0) # same end time for every rate (past the 12-beat blank)
 		logs.append(_log.duplicate())
 	check(logs[0] == logs[1] and logs[1] == logs[2] and logs[2] == logs[3],
 		"same events whatever the update rate: %s" % [logs])
@@ -425,6 +504,8 @@ func test_matches_original_frame_sampled_algorithm() -> void:
 		presses.sort_custom(func(a, b): return a[1] < b[1])
 		var ref := original_reference(presses, 4000.0, originals)
 		var e := make_engine(originals)
+		e.blank_beats = RhythmEngine.BLANK_DURATION
+		e.tempo_from_openings = false
 		for p in presses:
 			e.press(p[0], p[1])
 		e.advance(presses[-1][1] + 5.0)

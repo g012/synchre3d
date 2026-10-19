@@ -17,12 +17,21 @@ signal pressed(button: int, time: float)
 
 const METRONOME_TICK := preload("res://assets/audio/metronome.wav")
 const METRONOME_START := preload("res://assets/audio/metronome_start.wav")
+## One chanted syllable per button (A "Ah", B "Bra", X "Ca", Y "Da"), see tools/gen_audio.py.
+const SYLLABLE_SOUNDS: Array[AudioStream] = [
+	preload("res://assets/audio/syl_ah.wav"), preload("res://assets/audio/syl_bra.wav"),
+	preload("res://assets/audio/syl_ca.wav"), preload("res://assets/audio/syl_da.wav")]
+const FIZZLE_SOUND := preload("res://assets/audio/fizzle.wav")
 
 @export var book: SpellBook
 ## Metronome clicks once the tempo is locked (the original's behavior).
 @export var metronome := true
 @export var metronome_pitch := 1.0
 @export var metronome_volume_db := -8.0
+## Chanted syllables: played the instant a button is pressed.
+@export var voice := true
+@export var voice_pitch := 1.0
+@export var voice_volume_db := -4.0
 
 var character: ArenaCharacter
 var effects: SpellEffects
@@ -31,6 +40,7 @@ var engine: RhythmEngine
 var orb: MagicOrb
 
 var _player: AudioStreamPlayer
+var _voice: AudioStreamPlayer
 var _last_beat := -1
 
 
@@ -47,6 +57,13 @@ func _ready() -> void:
 	_player.volume_db = metronome_volume_db
 	_player.pitch_scale = metronome_pitch
 	add_child(_player)
+	# Polyphonic, so quick syllables ring over each other instead of cutting off.
+	_voice = AudioStreamPlayer.new()
+	var poly := AudioStreamPolyphonic.new()
+	poly.polyphony = 8
+	_voice.stream = poly
+	add_child(_voice)
+	_voice.play()
 	orb = MagicOrb.new()
 	orb.character = character
 	orb.fx = fx
@@ -56,6 +73,8 @@ func _ready() -> void:
 ## One syllable, at `time` seconds (PlayerInput clock). Safe to call at any time: moving,
 ## jumping or being knocked back never blocks the incantation.
 func syllable(button: int, time: float) -> void:
+	if voice:
+		_play_voice(SYLLABLE_SOUNDS[button], voice_volume_db, voice_pitch)
 	engine.press(button, time)
 
 
@@ -108,6 +127,7 @@ func _on_progress(pattern: RhythmPattern, step: int, _time: float) -> void:
 func _on_failed(pattern: RhythmPattern, step: int, reason: String, _time: float) -> void:
 	character.cast_level = 0.0
 	orb.fizzle()
+	_play_voice(FIZZLE_SOUND, -10.0, 1.0)
 	fizzled.emit(pattern.payload as SpellDefinition, step, reason)
 
 
@@ -125,3 +145,11 @@ func _play(stream: AudioStream) -> void:
 		return
 	_player.stream = stream
 	_player.play()
+
+
+func _play_voice(stream: AudioStream, volume_db: float, pitch: float) -> void:
+	if not _voice.playing:
+		_voice.play()
+	var pb := _voice.get_stream_playback() as AudioStreamPlaybackPolyphonic
+	if pb:
+		pb.play_stream(stream, 0.0, volume_db, pitch)
