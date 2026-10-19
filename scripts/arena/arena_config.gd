@@ -1,0 +1,67 @@
+class_name ArenaConfig
+extends Resource
+## Everything that defines the arena layout. Edit this resource (res://scenes/arena_config.tres)
+## and the island, holes, collision, grass and props regenerate from it.
+
+@export_group("Island")
+## Half-size of the elliptical island on X and Z (world units).
+@export var radius := Vector2(7.9, 5.7)
+## Amplitude of the organic wobble along the outer edge.
+@export var edge_wobble := 0.45
+## Thickness of the grass slab (depth of hole walls and cliffs).
+@export var thickness := 1.5
+## Extra depth of the rocky underside hanging below the slab.
+@export var underside_depth := 4.5
+## Marching-squares resolution: smaller = smoother hole edges, more triangles.
+@export var cell_size := 0.16
+@export var seed := 11
+
+@export_group("Holes")
+## One entry per hole: (centre x, centre z, radius).
+@export var holes: Array[Vector3] = [
+	Vector3(0.2, 0.1, 1.2),
+	Vector3(-4.4, -1.7, 0.9),
+	Vector3(4.3, 1.8, 0.95),
+	Vector3(-2.8, 3.0, 0.68),
+	Vector3(3.0, -2.9, 0.7),
+	Vector3(-6.4, 1.8, 0.52),
+]
+## Organic wobble applied to hole outlines.
+@export var hole_wobble := 0.12
+
+@export_group("Vegetation")
+## Grass blades per square unit inside grass clumps.
+@export var grass_density := 46.0
+## Keep grass this far from any edge so dangerous edges stay readable.
+@export var grass_edge_margin := 0.45
+@export var flower_density := 0.9
+
+@export_group("Props")
+## Trees: x, z, scale. Keep them toward the back (negative z) so they never hide players.
+@export var trees: Array[Vector3] = [
+	Vector3(-5.9, -3.2, 1.0),
+	Vector3(-3.1, -4.4, 0.85),
+	Vector3(5.7, -3.1, 1.1),
+]
+## Bushes: x, z, scale.
+@export var bushes: Array[Vector3] = [
+	Vector3(-0.9, -5.0, 0.8),
+	Vector3(1.6, -4.9, 0.7),
+	Vector3(7.3, 0.4, 0.6),
+]
+## Rocks: x, z, scale.
+@export var rocks: Array[Vector3] = [
+	Vector3(2.9, -4.5, 0.8),
+	Vector3(-7.2, -0.6, 0.7),
+	Vector3(6.2, 2.7, 0.65),
+	Vector3(-1.2, 4.8, 0.5),
+	Vector3(4.2, 4.5, 0.45),
+]
+
+## Tree stumps: x, z, scale.
+@export var stumps: Array[Vector3] = [Vector3(-4.6, 4.0, 0.9), Vector3(6.4, -1.6, 0.8)]
+## Mushroom clusters: x, z, scale (more spawn automatically at tree roots).
+@export var mushrooms: Array[Vector3] = [Vector3(-6.9, 0.6, 1.0), Vector3(2.2, 4.3, 1.2), Vector3(5.6, 3.6, 0.9)]
+
+@export_group("Players")
+@export var spawn_points: Array[Vector2] = [Vector2(-3.7, 1.1), Vector2(3.8, -0.9)]

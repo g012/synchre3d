@@ -1,0 +1,131 @@
+[gd_scene format=3 uid="uid://cfi5fu45xl275"]
+
+[ext_resource type="Script" uid="uid://unwm261heja5" path="res://scripts/main.gd" id="1_main"]
+[ext_resource type="Script" uid="uid://csqh6kpcjntv7" path="res://scripts/render/pixel_view.gd" id="2_view"]
+[ext_resource type="Script" uid="uid://cvbxxl6hc7514" path="res://scripts/render/pixel_camera.gd" id="3_cam"]
+[ext_resource type="Shader" uid="uid://byq74xt10hb0u" path="res://shaders/post_outline.gdshader" id="4_post"]
+[ext_resource type="Shader" uid="uid://c1sb11c2ktu6x" path="res://shaders/pixel_upscale.gdshader" id="5_up"]
+[ext_resource type="Script" uid="uid://b3kg56epouvni" path="res://scripts/arena/arena.gd" id="6_arena"]
+[ext_resource type="Resource" path="res://scenes/arena_config.tres" id="7_cfg"]
+[ext_resource type="Shader" uid="uid://1dokdm3ndd18" path="res://shaders/terrain.gdshader" id="8_terrain"]
+[ext_resource type="Script" uid="uid://cdw0x8mj42fuj" path="res://scripts/arena/props.gd" id="9_props"]
+[ext_resource type="Script" uid="uid://eityeil0p111" path="res://scripts/arena/vegetation.gd" id="10_veg"]
+[ext_resource type="Shader" uid="uid://sagsm1rwrypx" path="res://shaders/grass.gdshader" id="11_grass"]
+[ext_resource type="Texture2D" uid="uid://rf0waoljt7hf" path="res://assets/textures/grass_atlas.png" id="12_gatlas"]
+[ext_resource type="Script" uid="uid://bow0g1q5jt06l" path="res://scripts/fx/fx_sprites.gd" id="13_fx"]
+[ext_resource type="Shader" uid="uid://xhctchnpl4ir" path="res://shaders/fx.gdshader" id="14_fxsh"]
+[ext_resource type="Texture2D" uid="uid://dctt0g2uv78xf" path="res://assets/textures/fx_atlas.png" id="15_fxatlas"]
+[ext_resource type="Script" uid="uid://dftls8dhiovi0" path="res://scripts/ui/hud.gd" id="16_hud"]
+[ext_resource type="Script" uid="uid://ctd3t8fufxbrt" path="res://scripts/fx/clouds.gd" id="17_clouds"]
+
+[sub_resource type="Environment" id="env"]
+background_mode = 1
+background_color = Color(0.56, 0.74, 0.86, 1)
+ambient_light_source = 1
+reflected_light_source = 1
+
+[sub_resource type="ShaderMaterial" id="post_mat"]
+render_priority = 100
+shader = ExtResource("4_post")
+shader_parameter/enabled = true
+shader_parameter/debug_view = 0
+shader_parameter/depth_threshold = 0.18
+shader_parameter/depth_slope_scale = 3.0
+shader_parameter/foliage_threshold = 0.9
+shader_parameter/outline_mul = Color(0.42, 0.36, 0.52, 1)
+shader_parameter/character_outline_mul = Color(0.26, 0.21, 0.34, 1)
+shader_parameter/convex_threshold = 0.5
+shader_parameter/light_dir_view = Vector3(0, 0.7, 0.7)
+shader_parameter/edge_light_min = 0.25
+shader_parameter/edge_strength = 0.38
+shader_parameter/edge_color = Color(1, 0.96, 0.82, 1)
+shader_parameter/sky_top = Color(0.47, 0.72, 0.86, 1)
+shader_parameter/sky_bottom = Color(0.8, 0.91, 0.9, 1)
+shader_parameter/sky_steps = 7.0
+
+[sub_resource type="QuadMesh" id="post_quad"]
+material = SubResource("post_mat")
+
+[sub_resource type="ShaderMaterial" id="m_terrain"]
+render_priority = 0
+shader = ExtResource("8_terrain")
+shader_parameter/dither = 0.1
+shader_parameter/patch_scale = 0.45
+
+[sub_resource type="ShaderMaterial" id="m_grass"]
+render_priority = 0
+shader = ExtResource("11_grass")
+shader_parameter/atlas = ExtResource("12_gatlas")
+shader_parameter/atlas_tiles = 8.0
+shader_parameter/sprite_texels = 16.0
+shader_parameter/patch_scale = 0.45
+shader_parameter/dither = 0.1
+shader_parameter/sway_amount = 0.11
+shader_parameter/bend_amount = 0.26
+shader_parameter/depth_bias = 0.06
+
+[sub_resource type="ShaderMaterial" id="m_fx"]
+render_priority = 0
+shader = ExtResource("14_fxsh")
+shader_parameter/atlas = ExtResource("15_fxatlas")
+shader_parameter/atlas_tiles = 4.0
+
+[sub_resource type="ShaderMaterial" id="up_mat"]
+shader = ExtResource("5_up")
+
+[node name="Main" type="Node" unique_id=751042387]
+script = ExtResource("1_main")
+
+[node name="PixelView" type="Node" parent="." unique_id=1699878200]
+script = ExtResource("2_view")
+
+[node name="GameViewport" type="SubViewport" parent="PixelView" unique_id=2047029531]
+canvas_item_default_texture_filter = 0
+size = Vector2i(642, 362)
+render_target_update_mode = 4
+
+[node name="World" type="Node3D" parent="PixelView/GameViewport" unique_id=709565054]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="PixelView/GameViewport/World" unique_id=525145504]
+environment = SubResource("env")
+
+[node name="Sun" type="DirectionalLight3D" parent="PixelView/GameViewport/World" unique_id=1008490521]
+transform = Transform3D(0.66131186, 0.5395847, -0.52107096, 0, 0.6946584, 0.7193398, 0.75011104, -0.47570795, 0.45938584, 0, 0, 0)
+shadow_enabled = true
+directional_shadow_mode = 0
+directional_shadow_max_distance = 80.0
+
+[node name="Camera" type="Camera3D" parent="PixelView/GameViewport/World" unique_id=1690038566]
+near = 1.0
+far = 80.0
+script = ExtResource("3_cam")
+
+[node name="PostProcess" type="MeshInstance3D" parent="PixelView/GameViewport/World/Camera" unique_id=52630539]
+cast_shadow = 0
+extra_cull_margin = 16384.0
+mesh = SubResource("post_quad")
+
+[node name="Arena" type="Node3D" parent="PixelView/GameViewport/World" unique_id=1690076188]
+script = ExtResource("6_arena")
+config = ExtResource("7_cfg")
+terrain_material = SubResource("m_terrain")
+
+[node name="Props" type="Node3D" parent="PixelView/GameViewport/World/Arena" unique_id=277996952]
+script = ExtResource("9_props")
+
+[node name="Vegetation" type="Node3D" parent="PixelView/GameViewport/World/Arena" unique_id=2037674976]
+script = ExtResource("10_veg")
+grass_material = SubResource("m_grass")
+
+[node name="Fx" type="Node3D" parent="PixelView/GameViewport/World" unique_id=1958332059]
+script = ExtResource("13_fx")
+material = SubResource("m_fx")
+
+[node name="Clouds" type="Node3D" parent="PixelView/GameViewport/World" unique_id=1606986061]
+script = ExtResource("17_clouds")
+
+[node name="Hud" type="CanvasLayer" parent="PixelView/GameViewport" unique_id=1932666541]
+script = ExtResource("16_hud")
+
+[node name="Display" type="Sprite2D" parent="PixelView" unique_id=577182992]
+material = SubResource("up_mat")
