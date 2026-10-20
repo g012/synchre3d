@@ -14,6 +14,10 @@ extends RefCounted
 ##   consumed so they cannot be reused.
 ##
 ## Differences, all deliberate:
+## * The arena game sets one shared tempo before the match (`set_fixed_tempo`): it never
+##   blanks, and count-in/opening detection are off. Recognition itself is unchanged: like
+##   the original, a pattern is matched relative to its own taps, never to a bar, so a spell
+##   may start on any beat.
 ## * A tempo can also be set by the opening notes of a spell (`tempo_from_openings`): when
 ##   the newest OPENING_NOTES+ taps play a spell's first syllables with its rhythm (each
 ##   note within the usual +-20% of its own duration around a least-squares beat fit), the
@@ -41,7 +45,7 @@ const BLANK_DURATION := 6
 ## Notes of a spell needed to infer the tempo from it (2 intervals: a real rhythm).
 const OPENING_NOTES := 3
 ## Tempo range accepted from a spell opening.
-const OPENING_BPM := Vector2(40.0, 240.0)
+const OPENING_BPM := Vector2(80.0, 160.0)
 const TOLERANCE := 0.2
 const DEFAULT_BPM_R := 999.0
 ## Within this fraction of a note's tolerance a tap is judged "perfect".
@@ -55,6 +59,8 @@ var patterns: Array[RhythmPattern] = []
 var blank_beats := BLANK_DURATION * 2
 ## Lock the tempo from a spell's opening notes (see class doc).
 var tempo_from_openings := true
+## A tempo set from outside (`set_fixed_tempo`): never blanked, never re-detected.
+var fixed_tempo := false
 var bpm := 0.0
 var bpm_r := DEFAULT_BPM_R
 var has_blanked := true
@@ -72,6 +78,16 @@ var _progress_hi := 0.0
 
 func _init(pattern_list: Array[RhythmPattern] = []) -> void:
 	patterns = pattern_list
+
+
+## Uses `bpm` from now on, with beats falling on `origin` (seconds); silence never clears it.
+func set_fixed_tempo(value: float, origin: float) -> void:
+	fixed_tempo = true
+	tempo_from_openings = false
+	_set_bpm(value)
+	has_blanked = false
+	grid_origin = origin
+	tempo_locked.emit(bpm, origin)
 
 
 func beat_duration() -> float:
@@ -118,7 +134,7 @@ func advance(time: float) -> void:
 			if lock_t >= 0.0 and lock_t < next_t:
 				next_t = lock_t
 				kind = "lock"
-		if bpm > 0.0 and not notes.is_empty():
+		if bpm > 0.0 and not notes.is_empty() and not fixed_tempo:
 			var blank_t: float = notes[-1].t + blank_beats * beat_duration()
 			if blank_t < next_t:
 				next_t = blank_t

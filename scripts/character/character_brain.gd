@@ -21,3 +21,8 @@ func wants_push(_character: ArenaCharacter) -> bool:
 ## True when the character should jump now (only asked when a jump is possible).
 func wants_jump(_character: ArenaCharacter) -> bool:
 	return false
+
+
+## True when the character should dash now (direction = get_move, else facing).
+func wants_dash(_character: ArenaCharacter) -> bool:
+	return false

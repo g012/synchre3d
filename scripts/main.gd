@@ -1,6 +1,11 @@
 extends Node
-## Game flow: spawns the two fighters, runs rounds (intro -> fight -> winner -> reset),
-## tracks wins, and handles the 1P / 2P toggle and debug keys.
+## Game flow: spawns the two fighters, lets player 1 set the match tempo, runs rounds
+## (intro -> fight -> winner -> reset), tracks wins, and handles the 1P / 2P toggle and
+## debug keys.
+##
+## Tempo: before the first round player 1 taps four even beats (the original Synchre
+## count-in rule, clamped to 80-160 BPM). That tempo drives the shared BeatClock (metronome,
+## dancing flowers) and every caster's rhythm engine for the whole match.
 ##
 ## Human players move/jump/shove through a PlayerBrain and cast rhythmic incantations:
 ## PlayerInput (timestamped A/B/X/Y) -> SpellCaster (rhythm engine) -> SpellEffects.
@@ -11,7 +16,7 @@ const PIP_MODEL := preload("res://assets/models/pip.glb")
 const MOG_MODEL := preload("res://assets/models/mog.glb")
 const SPELLBOOK := preload("res://assets/spells/spellbook.tres")
 
-enum Phase { INTRO, FIGHT, ROUND_OVER }
+enum Phase { TEMPO, INTRO, FIGHT, ROUND_OVER }
 
 ## Delay after a round ends before the next one starts.
 @export var round_over_time := 2.6
@@ -35,6 +40,12 @@ var _round_decided := false
 ## Per fighter: its PlayerInput and SpellCaster when human-controlled, else null.
 var inputs: Array[PlayerInput] = [null, null]
 var casters: Array[SpellCaster] = [null, null]
+var beat_clock: BeatClock
+# Player 1's taps while choosing the tempo (newest last), and whether they changed since
+# the last check.
+var _tempo_taps := PackedFloat64Array()
+var _tempo_dirty := false
+var _tapped_bpm := 0.0
 
 
 func _ready() -> void:
@@ -46,8 +57,11 @@ func _ready() -> void:
 	spells.setup(arena, fx, camera, fighters)
 	_frame_arena()
 	arena.rebuilt.connect(_frame_arena)
+	beat_clock = BeatClock.new()
+	beat_clock.name = "BeatClock"
+	add_child(beat_clock)
 	_apply_mode()
-	start_round()
+	begin_tempo_setup()
 
 
 func _make_fighter(display: String, model: PackedScene, color: int) -> ArenaCharacter:
@@ -98,9 +112,12 @@ func _set_human(i: int, human: bool) -> void:
 		caster.character = fighters[i]
 		caster.effects = spells
 		caster.fx = fx
-		caster.metronome_pitch = 1.0 if i == 0 else 1.26
+		caster.metronome = false # the shared BeatClock keeps time
+		caster.voice_pitch = 1.0 if i == 0 else 1.12
 		fighters[i].add_child(caster)
 		input.syllable_pressed.connect(caster.syllable)
+		if i == 0:
+			input.syllable_pressed.connect(_on_tempo_tap)
 		input.syllable_released.connect(caster.syllable_released)
 		inputs[i] = input
 		casters[i] = caster
@@ -117,11 +134,79 @@ func _frame_arena() -> void:
 	camera.focus_bounds = Rect2(-r * 0.62, r * 1.24)
 
 
-func start_round() -> void:
-	phase = Phase.INTRO
+## New game: everyone stands on the island while player 1 taps the tempo.
+func begin_tempo_setup() -> void:
+	phase = Phase.TEMPO
 	phase_time = 0.0
-	_landed = 0
-	_round_decided = false
+	beat_clock.stop()
+	_tempo_taps.clear()
+	_tempo_dirty = false
+	_tapped_bpm = 0.0
+	for c in casters:
+		if c:
+			c.listening = false
+	_reset_arena_and_spawn()
+	hud.set_panels_visible(false)
+	_show_tempo_message()
+
+
+func _on_tempo_tap(_button: int, time: float) -> void:
+	if phase != Phase.TEMPO:
+		return
+	_tempo_taps.append(time)
+	if _tempo_taps.size() > 4:
+		_tempo_taps.remove_at(0)
+	_tempo_dirty = true
+	if not beat_clock.running:
+		_show_tempo_message()
+
+
+## Same rule as the original count-in: the last four taps (and the wait after them) must be
+## even within 20%. Re-run every frame while new taps are pending, because the rule also
+## needs a short wait after the 4th tap.
+func _update_tempo_detection() -> void:
+	if not _tempo_dirty or _tempo_taps.size() < 4:
+		return
+	var e := RhythmEngine.new()
+	e.tempo_from_openings = false
+	for t in _tempo_taps:
+		e.press(0, t)
+	e.advance(PlayerInput.now_seconds())
+	if e.bpm <= 0.0:
+		return
+	_tempo_dirty = false
+	_tapped_bpm = e.bpm
+	var bpm := clampf(e.bpm, BeatClock.BPM_RANGE.x, BeatClock.BPM_RANGE.y)
+	beat_clock.start(bpm, e.grid_origin)
+	_show_tempo_message()
+
+
+func _show_tempo_message() -> void:
+	if not beat_clock.running:
+		var sub := "P1: TAP A B X Y IN TIME, 4 TIMES  (80-160 BPM)"
+		if not _tempo_taps.is_empty():
+			sub += "   %d/4" % mini(_tempo_taps.size(), 4)
+		hud.show_message("SET THE TEMPO", hud.palette_color(28, 3), sub)
+		return
+	var note := ""
+	if not is_equal_approx(_tapped_bpm, beat_clock.bpm):
+		note = "  (TAPPED %d)" % int(_tapped_bpm)
+	hud.show_message("%d BPM" % int(beat_clock.bpm), hud.palette_color(28, 3),
+		"TAP AGAIN TO CHANGE   START / R: FIGHT!" + note)
+
+
+## Tempo confirmed: every caster joins the shared tempo and the first round starts.
+func _start_match() -> void:
+	for c in casters:
+		if c:
+			c.set_tempo(beat_clock.bpm, beat_clock.origin)
+			c.cancel()
+			c.listening = true
+	hud.set_panels_visible(true)
+	start_round()
+
+
+func _reset_arena_and_spawn() -> void:
 	arena.reset_ground()
 	spells.clear()
 	for c in casters:
@@ -135,6 +220,14 @@ func start_round() -> void:
 		fighters[i].spawn(Vector3(p.x, 0.0, p.y), face)
 	_update_camera_targets()
 	camera.snap_to_targets()
+
+
+func start_round() -> void:
+	phase = Phase.INTRO
+	phase_time = 0.0
+	_landed = 0
+	_round_decided = false
+	_reset_arena_and_spawn()
 	hud.show_message("READY?", hud.palette_color(1, 3))
 
 
@@ -174,6 +267,8 @@ func _physics_process(delta: float) -> void:
 	phase_time += delta
 	ArenaCharacter.separate(fighters[0], fighters[1])
 	match phase:
+		Phase.TEMPO:
+			_update_tempo_detection()
 		Phase.INTRO:
 			if _landed >= fighters.size() and phase_time > 1.0:
 				hud.show_message("FIGHT!", hud.palette_color(6, 3))
@@ -212,12 +307,17 @@ func _update_grass_actors() -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("toggle_two_player"):
+		# A new game: scores reset and player 1 picks the tempo again.
 		two_player = not two_player
 		scores = [0, 0]
 		_apply_mode()
-		start_round()
+		begin_tempo_setup()
 	elif event.is_action_pressed("restart_round"):
-		start_round()
+		if phase == Phase.TEMPO:
+			if beat_clock.running:
+				_start_match()
+		else:
+			start_round()
 	elif event.is_action_pressed("toggle_fullscreen"):
 		var w := get_window()
 		w.mode = Window.MODE_WINDOWED if w.mode == Window.MODE_FULLSCREEN else Window.MODE_FULLSCREEN
@@ -228,4 +328,5 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _mcp_state() -> Dictionary:
 	return {"phase": Phase.keys()[phase], "scores": scores, "two_player": two_player,
+		"bpm": beat_clock.bpm if beat_clock else 0.0,
 		"decided": _round_decided, "message": hud._message.text if hud._message.visible else ""}

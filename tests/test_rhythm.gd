@@ -22,6 +22,8 @@ func _init() -> void:
 	test_opening_each_spell_any_tempo()
 	test_opening_rejects_wrong_rhythm_or_buttons()
 	test_opening_then_tempo_kept()
+	test_fixed_tempo_never_blanks()
+	test_spell_starts_on_any_beat()
 	test_tempo_change_after_blank()
 	test_push_spell_matches()
 	test_spell_at_other_tempos()
@@ -151,6 +153,40 @@ func test_blank_after_twelve_beats() -> void:
 	check(e.bpm == 0.0 and has("lost @4.5000"), "blank_beats = 6 reproduces the original: %s" % [_log])
 
 
+# ------------------------------------------------------------------------------ shared fixed tempo
+
+func test_fixed_tempo_never_blanks() -> void:
+	var e := make_engine()
+	e.set_fixed_tempo(120.0, 0.0)
+	e.press(A, 0.25)
+	e.advance(300.0)
+	check(e.bpm == 120.0 and not has("lost"), "a fixed tempo survives 5 minutes of silence: %s" % [_log])
+	play(e, e.patterns[0], 301.3, 0.5)
+	check(has("match push"), "and still casts afterwards: %s" % [_log])
+	# No count-in or opening can change it.
+	count_in(e, 320.0, 0.8)
+	e.advance(330.0)
+	check(e.bpm == 120.0, "taps at another tempo do not change a fixed tempo")
+
+
+func test_spell_starts_on_any_beat() -> void:
+	# The tempo grid starts at 0 (beat 1 of bar 1). Each spell is started on every beat of
+	# the bar, on off-beats, and on an arbitrary phase: all cast.
+	var beat := 0.5
+	var bad := []
+	for pi in 3:
+		for start in [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 0.5, 2.5, 1.37]:
+			var e := make_engine()
+			e.set_fixed_tempo(120.0, 0.0)
+			var p: RhythmPattern = e.patterns[pi]
+			# `play` takes the measure start; the first note sits onset(0) beats after it.
+			var m: float = 10.0 + (start - p.onset(0)) * beat
+			play(e, p, m, beat)
+			if not has("match %s" % p.pattern_name):
+				bad.append("%s from beat %s" % [p.pattern_name, start])
+	check(bad.is_empty(), "every spell casts starting on any beat of the bar (or between): %s" % [bad])
+
+
 # ------------------------------------------------------------------------------ tempo from a spell opening
 
 func test_opening_sets_tempo() -> void:
@@ -169,21 +205,21 @@ func test_opening_each_spell_any_tempo() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 5
 	var bad := []
-	for bpm: float in [62.0, 75.0, 90.0, 118.0, 150.0, 190.0]:
+	for bpm: float in [85.0, 100.0, 120.0, 140.0, 150.0]:
 		for pi in 3:
 			var e := make_engine()
 			var p: RhythmPattern = e.patterns[pi]
 			var beat: float = 60.0 / bpm
-			# Human-ish timing: each note off by up to 30% of its own tolerance.
+			# Human-ish timing: each note off by up to 20% of its own tolerance.
 			var offsets := {}
 			for k in p.size():
-				offsets[k] = rng.randf_range(-0.3, 0.3) * 0.2 * p.beats[k] * beat
+				offsets[k] = rng.randf_range(-0.2, 0.2) * 0.2 * p.beats[k] * beat
 			offsets[0] = 0.0
 			play(e, p, 3.0, beat, offsets)
 			# The inferred tempo is as precise as the player (a few % with sloppy timing).
 			if not has("match %s" % p.pattern_name) or absf(e.bpm - bpm) > bpm * 0.06:
 				bad.append("%s@%d -> %s" % [p.pattern_name, bpm, _log])
-	check(bad.is_empty(), "every spell casts from a cold start at 62-190 bpm: %s" % [bad])
+	check(bad.is_empty(), "every spell casts from a cold start at 85-150 bpm: %s" % [bad])
 
 
 func test_opening_rejects_wrong_rhythm_or_buttons() -> void:

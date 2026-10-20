@@ -31,6 +31,7 @@ extends Resource
 @export var rock_count := Vector2i(9, 13)
 @export var stump_count := Vector2i(3, 5)
 @export var mushroom_count := Vector2i(5, 8)
+@export var dancing_flower_count := Vector2i(10, 14)
 
 @export_group("Holes")
 ## One entry per hole: (centre x, centre z, radius).
@@ -78,6 +79,10 @@ extends Resource
 @export var stumps: Array[Vector3] = [Vector3(-4.6, 4.0, 0.9), Vector3(6.4, -1.6, 0.8)]
 ## Mushroom clusters: x, z, scale (more spawn automatically at tree roots).
 @export var mushrooms: Array[Vector3] = [Vector3(-6.9, 0.6, 1.0), Vector3(2.2, 4.3, 1.2), Vector3(5.6, 3.6, 0.9)]
+
+## Dancing flowers (they move to the match tempo): x, z, scale.
+@export var dancing_flowers: Array[Vector3] = [Vector3(-5.2, -4.4, 1.0), Vector3(1.0, -5.3, 1.1),
+	Vector3(6.8, -0.3, 1.0), Vector3(-7.0, 2.4, 0.9), Vector3(3.6, 4.9, 1.0)]
 
 @export_group("Players")
 @export var spawn_points: Array[Vector2] = [Vector2(-3.7, 1.1), Vector2(3.8, -0.9)]

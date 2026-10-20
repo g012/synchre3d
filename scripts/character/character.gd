@@ -13,6 +13,7 @@ signal fell(character: ArenaCharacter)
 signal eliminated(character: ArenaCharacter)
 signal landed(character: ArenaCharacter)
 signal jumped(character: ArenaCharacter)
+signal dashed(character: ArenaCharacter)
 
 enum State { SPAWNING, ACTIVE, PUSHING, HITSTUN, FALLING, OUT, VICTORY, FROZEN }
 
@@ -33,6 +34,13 @@ enum State { SPAWNING, ACTIVE, PUSHING, HITSTUN, FALLING, OUT, VICTORY, FROZEN }
 @export var jump_velocity := 7.4
 ## Fraction of ground acceleration available in the air.
 @export var air_control := 0.7
+
+@export_group("Dash")
+## Horizontal speed of a dash (move_speed is 5), held for `dash_time`, then braked normally.
+@export var dash_speed := 13.0
+@export var dash_time := 0.16
+## Seconds before the next dash. One dash per jump while airborne.
+@export var dash_cooldown := 0.65
 
 @export_group("Push")
 ## Reach measured from this character's centre to the target's centre.
@@ -89,6 +97,10 @@ var _dust_timer := 0.0
 var _spin := 0.0
 var _jump_buffer := 0.0
 var _was_airborne := false
+var _dash_t := 0.0
+var _dash_cd := 0.0
+var _dash_fx := 0.0
+var _air_dash_used := false
 ## Incantation visuals, driven by the SpellCaster: 0 = idle, 1 = last syllable reached.
 var cast_level := 0.0
 var _cast_pose := 0.0
@@ -146,6 +158,9 @@ func spawn(at: Vector3, face: Vector3) -> void:
 	_spin = 0.0
 	_hit_lean = 0.0
 	_jump_buffer = 0.0
+	_dash_t = 0.0
+	_dash_cd = 0.0
+	_air_dash_used = false
 	cast_level = 0.0
 	_set_state(State.SPAWNING)
 	_visual.visible = true
@@ -186,6 +201,7 @@ func _physics_process(delta: float) -> void:
 	_state_time += delta
 	_cooldown = maxf(_cooldown - delta, 0.0)
 	_jump_buffer = maxf(_jump_buffer - delta, 0.0)
+	_dash_cd = maxf(_dash_cd - delta, 0.0)
 	if brain:
 		brain.update(self, delta)
 		if brain.wants_jump(self):
@@ -203,9 +219,15 @@ func _physics_process(delta: float) -> void:
 				landed.emit(self)
 				_set_state(State.FROZEN)
 		State.ACTIVE:
-			_update_move(delta, 1.0 if is_on_floor() else air_control)
+			if _dash_t > 0.0:
+				# Committed burst: no steering until it ends, then normal braking takes over.
+				_dash_t -= delta
+				_dash_trail(delta)
+			else:
+				_update_move(delta, 1.0 if is_on_floor() else air_control)
 			if brain and brain.wants_push(self) and _cooldown <= 0.0 and is_on_floor():
 				_start_push()
+			_try_dash()
 			_try_jump()
 			_apply_gravity_and_move(delta)
 		State.PUSHING:
@@ -280,11 +302,44 @@ func _apply_gravity_and_move(delta: float) -> void:
 		velocity.y = 0.0
 	move_and_slide()
 	var airborne := not is_on_floor()
+	if not airborne:
+		_air_dash_used = false
 	if _was_airborne and not airborne:
 		_squash_vel += 6.0
 		if fx:
 			fx.dust_ring(global_position + Vector3.UP * 0.05, 4)
 	_was_airborne = airborne
+
+
+## Dashes along the stick (or the facing direction without input) if the cooldown allows.
+func _try_dash() -> void:
+	if _dash_cd > 0.0 or (_air_dash_used and not is_on_floor()) or not brain or not brain.wants_dash(self):
+		return
+	var dir: Vector3 = brain.get_move(self)
+	dir.y = 0.0
+	dir = dir.normalized() if dir.length_squared() > 0.04 else facing
+	_dash_t = dash_time
+	_dash_cd = dash_cooldown + dash_time
+	if not is_on_floor():
+		_air_dash_used = true
+		velocity.y = maxf(velocity.y, 1.5)
+	velocity.x = dir.x * dash_speed
+	velocity.z = dir.z * dash_speed
+	_facing_angle = atan2(dir.x, dir.z)
+	facing = dir
+	_squash_vel -= 6.0
+	_dash_fx = 0.0
+	if fx:
+		fx.whoosh(global_position + Vector3.UP * 0.3, dir)
+	dashed.emit(self)
+
+
+## Dust puffs left behind while dashing.
+func _dash_trail(delta: float) -> void:
+	_dash_fx -= delta
+	if fx and _dash_fx <= 0.0:
+		_dash_fx = 0.035
+		fx.puff(global_position + Vector3.UP * 0.12 - facing * 0.25, 0.6)
 
 
 ## Starts a buffered jump if standing on the ground.
@@ -410,6 +465,7 @@ func receive_push(dir: Vector3, strength: float, _attacker: ArenaCharacter) -> v
 	velocity.x = dir.x * strength
 	velocity.z = dir.z * strength
 	velocity.y = 1.5
+	_dash_t = 0.0
 	_set_state(State.HITSTUN)
 	_hitstop = hitstop_time
 	_flash = 1.0
@@ -540,6 +596,13 @@ func _animate_parts(delta: float) -> void:
 			hand_r = Vector3(-0.05, 0.25, 0.0)
 			_squash = minf(_squash, -1.5)
 
+	# Dash: lean hard into the burst, arms swept back.
+	if _dash_t > 0.0 and state == State.ACTIVE:
+		target_lean = 0.55
+		hand_l = Vector3(-0.04, 0.06, -0.16)
+		hand_r = Vector3(0.04, 0.06, -0.16)
+		foot_l.z = -0.1
+		foot_r.z = 0.08
 	# Airborne: tuck the feet and lift the arms a little.
 	var air := not is_on_floor() and state in [State.ACTIVE, State.PUSHING, State.HITSTUN]
 	if air:

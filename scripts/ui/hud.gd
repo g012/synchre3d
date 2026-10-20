@@ -104,9 +104,9 @@ func set_score(a: int, b: int) -> void:
 func set_mode(two_player: bool) -> void:
 	_mode.text = "2P LOCAL" if two_player else "1P VS CPU"
 	if two_player:
-		_hint.text = "PADS 1+2 / P1 WASD IJKL SPACE E / P2 ARROWS NUM 2468 0 .   BACK/TAB 1P"
+		_hint.text = "PADS 1+2 / P1 WASD IJKL SPC SHIFT E / P2 ARROWS NUM 2468 0 + .  TAB 1P"
 	else:
-		_hint.text = "STICK/WASD MOVE  ABXY (KLJI) CHANT  RT/SPACE JUMP  RB/E SHOVE  BACK/TAB 2P"
+		_hint.text = "STICK/WASD MOVE  ABXY (KLJI) CHANT  RT/SPACE JUMP  LB/SHIFT DASH  RB/E SHOVE"
 
 
 ## One rhythm readout per human caster: P1 bottom-left, P2 bottom-right.
@@ -122,6 +122,11 @@ func set_rhythm_panels(casters: Array[SpellCaster]) -> void:
 		_root.add_child(panel)
 		_panels.append(panel)
 	_layout()
+
+
+func set_panels_visible(on: bool) -> void:
+	for p in _panels:
+		p.visible = on
 
 
 func show_message(text: String, color := Color.WHITE, sub := "") -> void:

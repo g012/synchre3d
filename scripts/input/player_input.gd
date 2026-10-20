@@ -6,7 +6,7 @@ extends Node
 ##   event (`Time.get_ticks_usec`, like the original Synchre RhythmInput), so rhythm timing
 ##   never depends on the render or physics rate. Events are plain data (player, button,
 ##   time): exactly what a network layer would forward later.
-## * Movement (left stick / keys), jump (RT / key) and the melee shove (RB / key) are
+## * Movement (left stick / keys), jump (RT / key), dash (LB / key) and the shove (RB / key) are
 ##   sampled by the character's brain during physics, independently of the incantation.
 
 ## Emitted for every face-button press; `time` is in seconds on the monotonic clock.
@@ -64,5 +64,13 @@ func jump_just_pressed() -> bool:
 func push_just_pressed() -> bool:
 	for p in prefixes:
 		if Input.is_action_just_pressed(p + "push"):
+			return true
+	return false
+
+
+## True on the physics tick the dash button (LB) goes down.
+func dash_just_pressed() -> bool:
+	for p in prefixes:
+		if Input.is_action_just_pressed(p + "dash"):
 			return true
 	return false

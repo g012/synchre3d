@@ -33,6 +33,7 @@ static func populate(cfg: ArenaConfig, base: ArenaConfig, rng: RandomNumberGener
 		cfg.rocks = _scaled(base.rocks, k, true)
 		cfg.stumps = _scaled(base.stumps, k, true)
 		cfg.mushrooms = _scaled(base.mushrooms, k, true)
+		cfg.dancing_flowers = _scaled(base.dancing_flowers, k, true)
 		var sp: Array[Vector2] = []
 		for s in base.spawn_points:
 			sp.append(s * k)
@@ -85,6 +86,9 @@ static func populate(cfg: ArenaConfig, base: ArenaConfig, rng: RandomNumberGener
 	cfg.rocks = _scatter(rng, base.rock_count, Vector2(0.45, 0.85), 0.7, cfg, island_sdf, holes, spawns, placed, Callable())
 	cfg.stumps = _scatter(rng, base.stump_count, Vector2(0.75, 0.95), 0.6, cfg, island_sdf, holes, spawns, placed, Callable())
 	cfg.mushrooms = _scatter(rng, base.mushroom_count, Vector2(0.9, 1.2), 0.4, cfg, island_sdf, holes, spawns, placed, Callable())
+	# Dancing flowers line the edge (a ring of dancers around the fight), a few further in.
+	cfg.dancing_flowers = _scatter(rng, base.dancing_flower_count, Vector2(1.5, 1.9), 0.35, cfg, island_sdf, holes, spawns, placed,
+		func(p: Vector2): return island_sdf.call(p) > -3.2 or rng.randf() < 0.25)
 
 
 static func _scatter(rng: RandomNumberGenerator, count: Vector2i, scale: Vector2, clearance: float, cfg: ArenaConfig,

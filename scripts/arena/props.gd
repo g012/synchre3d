@@ -1,7 +1,7 @@
 @tool
 class_name Props
 extends Node3D
-## Places the Blender-made props (trees, bushes, rocks, stumps, mushrooms) listed in the
+## Places the Blender-made props (trees, bushes, rocks, stumps, mushrooms, dancing flowers) listed in the
 ## ArenaConfig, applies toon materials, turns foliage blobs into leaf-card billboards and adds
 ## obstacle colliders. Footprints are published to `arena.obstacles` for grass and AI.
 ## Props ride the ground when spells raise mounds under them (`_on_ground_changed`).
@@ -53,6 +53,20 @@ func rebuild_from_arena(arena: Arena) -> void:
 		_place(arena, STUMP, s, rng, 0.3 * s.z, false)
 	for m in cfg.mushrooms:
 		_place(arena, MUSHROOMS, m, rng, 0.0, false)
+	# Petal colors: pink, blue, white, lavender, red.
+	var petals: Array[int] = [30, 31, 1, 12, 4]
+	for i in cfg.dancing_flowers.size():
+		var f := cfg.dancing_flowers[i]
+		var flower := DancingFlower.new()
+		flower.petal_index = petals[rng.randi() % petals.size()]
+		flower.mirrored = i % 2 == 1
+		flower.position = Vector3(f.x, 0.0, f.y)
+		# Faces turned roughly toward the camera.
+		flower.rotation.y = rng.randf_range(-0.45, 0.45)
+		flower.scale = Vector3.ONE * f.z
+		add_child(flower)
+		_entries.append({"node": flower, "body": null, "xz": Vector2(f.x, f.y), "y": 0.0, "leaves": Vector2i.ZERO})
+		arena.decor_footprints.append(Vector3(f.x, f.y, 0.22 * f.z))
 
 	_leaves = leaves.build()
 	_leaf_base = leaves.transforms

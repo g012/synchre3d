@@ -1,0 +1,83 @@
+class_name DancingFlower
+extends Node3D
+## A little flower with a face that dances to the match tempo (BeatClock), in the spirit of
+## the dancing flowers of Super Mario Bros. Wonder: a stomp-squash on every beat, swaying
+## left/right on alternate beats with the head counter-tilting, leaves waving like arms,
+## petals pulsing, and a happy hop with squinted eyes on each bar's downbeat.
+## Before a tempo exists it just sways gently. Model: tools/blender/build_props.py.
+
+const MODEL := preload("res://assets/models/dancing_flower.glb")
+
+## Palette index of the petals.
+@export var petal_index := 30
+## Mirrors the choreography (neighbours lean opposite ways).
+@export var mirrored := false
+
+var _body: Node3D
+var _parts := {}
+var _rest := {}
+var _petals: Array[Node3D] = []
+var _idle_seed := 0.0
+
+
+func _ready() -> void:
+	_idle_seed = randf() * TAU
+	_body = MODEL.instantiate() as Node3D
+	add_child(_body)
+	var petal_mat := ToonMaterials.SOLID.duplicate() as ShaderMaterial
+	petal_mat.set_shader_parameter("palette_index", petal_index)
+	for mi in ToonMaterials.mesh_instances(_body):
+		mi.material_override = petal_mat if mi.name.begins_with("Petal") else ToonMaterials.SOLID
+	for part in ["Stem", "LeafL", "LeafR", "Head", "EyeL", "EyeR", "Mouth"]:
+		var n := _body.find_child(part, true, false) as Node3D
+		if n:
+			_parts[part] = n
+			_rest[part] = n.transform
+	for n in _body.find_children("Petal*", "Node3D", true, false):
+		_petals.append(n)
+		_rest[n.name] = n.transform
+
+
+func _process(_delta: float) -> void:
+	var clock := BeatClock.instance
+	var b := clock.beats_now() if clock and clock.running else -1.0
+	var mirror := -1.0 if mirrored else 1.0
+	var lean := 0.0
+	var hit := 0.0
+	var downbeat := false
+	var t := Time.get_ticks_msec() * 0.001
+	if b < 0.0:
+		# No tempo yet: a slow idle sway.
+		lean = sin(t * 1.4 + _idle_seed) * 0.07 * mirror
+	else:
+		var n := floori(b)
+		var p := b - n
+		# Sharp attack on the beat, quick decay.
+		hit = pow(1.0 - p, 3.0)
+		downbeat = posmod(n, 4) == 0
+		# Extremes land on the beats, alternating sides; snappy in between.
+		var s := cos(PI * b)
+		lean = signf(s) * pow(absf(s), 0.45) * 0.24 * mirror
+	var strength := 1.5 if downbeat else 1.0
+	_body.rotation = Vector3(0.0, 0.0, lean)
+	_body.scale = Vector3(1.0 + 0.1 * hit * strength, 1.0 - 0.16 * hit * strength, 1.0 + 0.1 * hit * strength)
+	_body.position.y = 0.07 * hit if downbeat else 0.0
+
+	_pose("Head", Vector3(0.0, 0.03 * (1.0 - hit), 0.0), Vector3(0.22 * hit, 0.0, -lean * 1.4))
+	_pose("LeafL", Vector3.ZERO, Vector3(0.0, 0.0, -0.55 * (lean / 0.24) * mirror - 0.3 * hit))
+	_pose("LeafR", Vector3.ZERO, Vector3(0.0, 0.0, -0.55 * (lean / 0.24) * mirror + 0.3 * hit))
+	var squint := 0.35 if downbeat and hit > 0.35 else 1.0
+	for eye in ["EyeL", "EyeR"]:
+		_pose(eye, Vector3.ZERO, Vector3.ZERO, Vector3(1.0, squint, 1.0))
+	_pose("Mouth", Vector3.ZERO, Vector3.ZERO, Vector3(1.0 + 0.4 * hit, 1.0 + 1.2 * hit, 1.0))
+	for petal in _petals:
+		var rest: Transform3D = _rest[petal.name]
+		petal.transform = rest.scaled_local(Vector3.ONE * (1.0 + 0.2 * hit * strength))
+
+
+func _pose(part: String, offset: Vector3, rot: Vector3, scl := Vector3.ONE) -> void:
+	var n: Node3D = _parts.get(part)
+	if not n:
+		return
+	var rest: Transform3D = _rest[part]
+	n.transform = Transform3D(rest.basis * Basis.from_euler(rot).scaled(scl), rest.origin + offset)

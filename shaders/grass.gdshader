@@ -26,6 +26,8 @@ uniform float bend_amount = 0.26;
 uniform float depth_bias = 0.06;
 
 global uniform vec4 actor_a;
+// Match tempo in beats since the first downbeat (BeatClock), -1 before the tempo is set.
+global uniform float beat_time;
 global uniform vec4 actor_b;
 
 varying flat int v_ground_idx;
@@ -69,6 +71,13 @@ void vertex() {
 	vec3 pv = (VIEW_MATRIX * vec4(push.x, 0.0, push.y, 0.0)).xyz;
 	pv.xy = round(pv.xy / texel) * texel;
 
+	// Flowers bop to the beat: stretch up on each beat and lean to alternate sides, in
+	// whole texels like the wind.
+	if (INSTANCE_CUSTOM.r > 0.0 && beat_time >= 0.0) {
+		float hit = pow(1.0 - fract(beat_time), 3.0);
+		float side = mod(floor(beat_time), 2.0) * 2.0 - 1.0;
+		pv.xy += vec2(side * (rnd > 0.5 ? 1.0 : -1.0), round(hit * 2.0)) * texel;
+	}
 	vec2 local = VERTEX.xy * sprite_texels * texel;
 	// A tiny pull toward the camera avoids z-fighting with the ground at the base.
 	VERTEX = bv + vec3(local, 0.0) + vec3(pv.xy * top, depth_bias);

@@ -31,8 +31,9 @@ Project Settings.
 | Syllable "Da" | Y | I | Numpad 8 |
 | Jump | RT (analog, 50% threshold, one jump per pull) | Space | Numpad 0 / Numpad Enter |
 | Shove (melee push) | RB | E | Numpad . |
-| Switch 1P ⇄ 2P (resets scores) | Back | Tab | |
-| Restart round | Start | R | |
+| Dash (toward the stick, else forward; 0.65 s cooldown, one per jump in the air) | LB | Left Shift | Numpad + |
+| Switch 1P ⇄ 2P (new game: scores reset, tempo chosen again) | Back | Tab | |
+| Restart round / confirm the tempo | Start | R | |
 | Fullscreen / debug: hide outline pass | | F11 / F1 | |
 
 Keyboard keys are bound by physical position, so they work the same on AZERTY. In 1-player
@@ -53,16 +54,13 @@ console). The camera follows both fighters and zooms out a little when they are 
 
 ## Rhythmic spellcasting
 
-1. **Set your tempo**, either way:
-   - **Just start a spell.** As soon as your first three syllables match a spell's opening
-     in rhythm (its buttons, and intervals within ±20% of each note), the tempo locks at that
-     speed and the incantation simply continues. A whole spell can be cast from silence.
-   - **Count in.** Tap any four face buttons evenly. Once four taps and the wait after them
-     are even (within ±20%), your tempo locks (the original Synchre rule).
-
-   The metronome then clicks and the panel shows your BPM and a 4-beat light (before that:
-   `TAP 4 BEATS` with a count). Any tempo works. The tempo stays while you keep playing;
-   12 silent beats reset it (the original used 6).
+1. **Player 1 sets the tempo, once, before the match.** The game opens on `SET THE TEMPO`:
+   tap any face button four times evenly (the original Synchre count-in rule: the taps and
+   the wait after them within ±20%). The tempo is clamped to **80–160 BPM** (the screen
+   says so if your taps were outside). Tap again to change it, then press **Start / R** to
+   fight. That tempo is shared by both players and by everything that moves to the music
+   (metronome, dancing flowers) for the whole match. It never resets; switching 1P/2P starts
+   a new game and asks again.
 2. **Chant.** Each spell is one measure (4 beats) of syllables in a set rhythm:
 
    | Spell | Buttons | Rhythm (beats before each note) | Effect |
@@ -71,9 +69,10 @@ console). The camera follows both fighters and zooms out a little when they are 
    | **Open Pit** | X Y X Y | 1½, ½, 1½, ½ (the original `basic2` pattern) | Opens a real hole about 2.4 units in front of you |
    | **Mend Earth** | B Y B Y A | 1, 1, ½, ½, 1 | Closes the hole nearest to the spot in front of you. With no hole in reach it raises the ground 2.2 units ahead into a **bump**; cast it again at that mound for a **hill**, and again for a **mountain**. Rising ground throws anyone standing on it outward (harder at each level); the caster just rides it. |
 
-   Every note must land within 20% of its own duration. The whole incantation may drift a
-   little as a block (the original's sliding measure), but the right buttons in the wrong
-   rhythm do not cast.
+   Every note must land within 20% of its own duration, measured against the match tempo.
+   **A spell can start on any beat** (or between beats): there is no bar to wait for, the
+   rhythm is checked relative to your own first syllable, as in the original. The right
+   buttons in the wrong rhythm do not cast.
 3. **Read the feedback.** Gathered magic grows at your hands with each correct syllable, and
    your character poses and bobs. The rhythm panel (bottom-left; P2 bottom-right) shows:
    - your last syllables with a timing tick for each: centred = on time, shifted left or blue
@@ -86,6 +85,12 @@ Every syllable has its own chanted voice (Ah, Bra, Ca and Da on the notes A3, C4
 so each incantation is a tiny melody), and each spell effect has its own sound (bolt
 whoosh, ground cracking open, earth mending with a chime, ground heaving up), plus a fizzle.
 They are synthesized by `tools/gen_audio.py`.
+
+**Dancing flowers** with little faces ring the island and dance to the match tempo, in the
+spirit of Super Mario Bros. Wonder: a squash on every beat, swaying to alternate sides with
+the head counter-tilting, leaves waving, petals pulsing, and a hop with squinted eyes on
+each bar's downbeat. Before the tempo is set they just sway. The small flowers in the grass
+bop on the beat too.
 
 Bumps and hills are walkable. Mountain flanks are too steep to climb, and they stop Push
 bolts, which otherwise glide over gentle slopes. Holes can be opened through a hill.
@@ -199,9 +204,13 @@ Each stage only talks to the next one through plain data or signals:
    and the RT jump are polled separately during physics.
 2. **Tempo and rhythm recognition** — `scripts/rhythm/rhythm_engine.gd`, a port of the
    original `RhythmInput` with the same rules (tempo inference, blank, 20% per-note
-   tolerance, measure-anchored matching, consumed taps). Two deliberate additions: the blank
-   is 12 beats instead of 6 (`blank_beats`), and a spell's opening notes can set the tempo
-   (`tempo_from_openings`, a least-squares beat fit checked with the usual tolerance). Time is injected, and the
+   tolerance, matching relative to the taps, consumed taps). In the game the tempo comes
+   from player 1's count-in before the match (`scripts/main.gd`, same detection code) and is
+   given to every engine with `set_fixed_tempo` (never blanks, never re-detected).
+   `scripts/rhythm/beat_clock.gd` holds it for the metronome, the dancing flowers and the
+   grass (`beat_time` shader global). Still available in the engine for other modes: a
+   12-beat blank (`blank_beats`, the original used 6) and tempo from a spell's opening
+   notes (`tempo_from_openings`). Time is injected, and the
    original's once-per-frame checks are solved in closed form, which equals the original at
    infinite frame rate. Recognition therefore depends only on timestamps, never on render or
    physics rate. Patterns come from `scripts/rhythm/rhythm_pattern.gd`, the original pattern
@@ -288,12 +297,14 @@ tools/        palette / sprite / font generators, blender/ build scripts
 godot --headless --path . -s tests/test_rhythm.gd
 ```
 
-The suite has 63 checks covering:
+The suite has 67 checks covering:
 
 - tempo lock time and BPM
 - tempo tolerance boundaries
 - the 12-beat blank (and the original 6) and tempo changes
-- tempo set by a spell's opening: every spell cast from silence at 62–190 BPM with sloppy
+- a fixed match tempo: never blanks, cannot be changed by taps, and every spell casts when
+  started on each beat of the bar, on off-beats and at an arbitrary phase
+- tempo set by a spell's opening: every spell cast from silence at 85–150 BPM with sloppy
   timing, wrong rhythm or wrong buttons rejected, the tempo kept for the next spell
 - every spell at 70–160 BPM
 - wrong and missed syllables
@@ -333,6 +344,11 @@ Built and tested against Godot 4.7.2 and Blender 5.2.1:
   - a Push bolt gliding over a hill to hit Mog, and stopped by a mountain
   - RB and E shoves, a jump over a hole, walking into a hole
   - collision vs. the exact height function: within 5 cm on a mountain
+- Tempo setup and dash, again with simulated pad input: 4 taps at 600 ms locked 99–100 BPM
+  and set the flowers dancing; taps at ~196 BPM were clamped to 160 and shown; Start began
+  the match with both casters on the shared tempo; a Push started mid-bar (off the beat)
+  cast; LB dashed (5.6 units in 0.73 s vs ~3.3 walking) and a second press within the
+  cooldown was ignored; Tab returned to the tempo screen.
 
 Not verified:
 

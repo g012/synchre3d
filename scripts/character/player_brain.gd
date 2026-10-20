@@ -1,6 +1,6 @@
 class_name PlayerBrain
 extends CharacterBrain
-## Human control: movement, jump and the melee shove (RB) come from a PlayerInput. Spells
+## Human control: movement, jump, dash (LB) and the melee shove (RB) come from a PlayerInput. Spells
 ## are fed to the character's SpellCaster from the same PlayerInput's timestamped syllable
 ## events, so they never interfere with moving, jumping or shoving.
 
@@ -9,6 +9,7 @@ const JUMP_BUFFER := 0.12
 var input: PlayerInput
 var _jump_buffer := 0.0
 var _push_buffer := 0.0
+var _dash_buffer := 0.0
 
 
 func _init(player_input: PlayerInput) -> void:
@@ -18,6 +19,9 @@ func _init(player_input: PlayerInput) -> void:
 func update(_character: ArenaCharacter, delta: float) -> void:
 	_jump_buffer = maxf(_jump_buffer - delta, 0.0)
 	_push_buffer = maxf(_push_buffer - delta, 0.0)
+	_dash_buffer = maxf(_dash_buffer - delta, 0.0)
+	if input.dash_just_pressed():
+		_dash_buffer = JUMP_BUFFER
 	if input.jump_just_pressed():
 		_jump_buffer = JUMP_BUFFER
 	if input.push_just_pressed():
@@ -38,5 +42,12 @@ func wants_jump(_character: ArenaCharacter) -> bool:
 func wants_push(_character: ArenaCharacter) -> bool:
 	if _push_buffer > 0.0:
 		_push_buffer = 0.0
+		return true
+	return false
+
+
+func wants_dash(_character: ArenaCharacter) -> bool:
+	if _dash_buffer > 0.0:
+		_dash_buffer = 0.0
 		return true
 	return false

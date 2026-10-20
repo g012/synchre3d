@@ -28,6 +28,8 @@ const FIZZLE_SOUND := preload("res://assets/audio/fizzle.wav")
 @export var metronome := true
 @export var metronome_pitch := 1.0
 @export var metronome_volume_db := -8.0
+## False while the match tempo is being chosen: syllables only sound, nothing is cast.
+var listening := true
 ## Chanted syllables: played the instant a button is pressed.
 @export var voice := true
 @export var voice_pitch := 1.0
@@ -75,11 +77,18 @@ func _ready() -> void:
 func syllable(button: int, time: float) -> void:
 	if voice:
 		_play_voice(SYLLABLE_SOUNDS[button], voice_volume_db, voice_pitch)
-	engine.press(button, time)
+	if listening:
+		engine.press(button, time)
 
 
 func syllable_released(button: int, time: float) -> void:
-	engine.release(button, time)
+	if listening:
+		engine.release(button, time)
+
+
+## Locks this caster to the match tempo (see BeatClock).
+func set_tempo(bpm: float, origin: float) -> void:
+	engine.set_fixed_tempo(bpm, origin)
 
 
 ## Drops any incantation in progress (new round); the tempo is kept while the player
