@@ -8,7 +8,8 @@ Only enabled spells can be chanted, show on the rhythm panel and are used by the
 Buttons: A "Ah", B "Bra", X "Ca", Y "Da". Rhythm: beats before each note (the first value is
 the lead-in, so only the gaps after it matter); every spell fills one 4-beat measure. No two
 spells share their first two syllables, so a chant is never mistaken for another one (checked
-by `tests/test_rhythm.gd` with the whole book enabled).
+by `tests/test_rhythm.gd` with the whole book enabled). Spells may share a first syllable: until the
+chant tells them apart, the gathered magic shows all of them (see the README).
 
 ## In play
 

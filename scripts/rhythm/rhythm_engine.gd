@@ -30,6 +30,8 @@ extends RefCounted
 ## * Patterns may require specific buttons per note (`RhythmPattern.syllables`).
 ## * Prefix progress, per-note early/late judgement and "fizzle" events are derived from the
 ##   very same tolerance math, for feedback/visuals only; the full match stays authoritative.
+##   Progress follows every spell the syllables so far could still become (spells sharing an
+##   opening), and only fails when none of them can continue.
 
 signal note_pressed(instr: int, time: float)
 signal tempo_locked(bpm: float, time: float)
@@ -70,10 +72,13 @@ var now := 0.0
 ## Taps: { instr, t, duration, consumed } (same fields as the original _key_timings).
 var notes: Array[Dictionary] = []
 
+## Incantation in progress: how many syllables are done, every spell those syllables could
+## still become (`progress_candidates`: { pattern, lo, hi } with lo/hi the feasible measure
+## start, as from `_fit`), and the one leading (stable while it stays a candidate; visuals
+## and failure reasons use it).
 var progress_pattern: RhythmPattern = null
 var progress_step := 0
-var _progress_lo := 0.0
-var _progress_hi := 0.0
+var progress_candidates: Array[Dictionary] = []
 
 
 func _init(pattern_list: Array[RhythmPattern] = []) -> void:
@@ -140,7 +145,10 @@ func advance(time: float) -> void:
 				next_t = blank_t
 				kind = "blank"
 		if progress_step > 0 and bpm > 0.0:
-			var deadline := _progress_deadline()
+			# The first candidate to run out of time drops out; the last one fails.
+			var deadline := INF
+			for c in progress_candidates:
+				deadline = minf(deadline, _deadline(c))
 			if deadline < next_t:
 				next_t = deadline
 				kind = "timeout"
@@ -157,7 +165,7 @@ func advance(time: float) -> void:
 				has_blanked = true
 				tempo_lost.emit(next_t)
 			"timeout":
-				_fail_progress("too late", next_t)
+				_drop_late_candidates(next_t)
 	now = time
 
 
@@ -351,25 +359,28 @@ func _track_progress(time: float, matched: RhythmPattern) -> void:
 		pattern_matched.emit(matched, time)
 		return
 
-	# Longest incantation prefix that the newest taps satisfy (buttons + timing).
-	var best: RhythmPattern = null
+	# Longest incantation prefix that the newest taps satisfy (buttons + timing), and every
+	# spell that satisfies it.
 	var best_k := 0
-	var best_fit: Array[float] = []
+	var found: Array[Dictionary] = []
 	for pattern in patterns:
 		if pattern.syllables.is_empty():
 			continue
 		var idx := _recent(pattern, time)
 		for k in range(mini(pattern.size() - 1, idx.size()), 0, -1):
-			if k <= best_k:
+			if k < best_k:
 				break
 			var fit := _fit(pattern, idx, k, false)
 			if not fit.is_empty():
-				best = pattern
-				best_k = k
-				best_fit = fit
+				if k > best_k:
+					best_k = k
+					found.clear()
+				found.append({"pattern": pattern, "lo": fit[0], "hi": fit[1]})
 				break
 
-	var continues := best != null and best == progress_pattern and best_k == progress_step + 1
+	# Any candidate reaching one more syllable means the incantation goes on (it was a
+	# candidate before: its first syllables fit the very same taps).
+	var continues := progress_step > 0 and best_k == progress_step + 1
 	if progress_step > 0 and not continues:
 		var reason := _break_reason(note, time)
 		var miss := {"instr": note.instr, "t": time, "pattern": progress_pattern,
@@ -379,24 +390,43 @@ func _track_progress(time: float, matched: RhythmPattern) -> void:
 		_fail_progress(reason.text, time)
 		# A tap that just broke an incantation may only start a new one from its first note.
 		if best_k > 1:
-			best = _pattern_starting_with(note.instr)
-			best_k = 1 if best else 0
-			if best:
-				best_fit = [time - best.onset(0) * beat_duration() - TOLERANCE * best.beats[0] * beat_duration(),
-					time - best.onset(0) * beat_duration() + TOLERANCE * best.beats[0] * beat_duration()]
+			best_k = 0
+			found.clear()
+			var bd := beat_duration()
+			for pattern in patterns:
+				if not pattern.syllables.is_empty() and pattern.syllables[0] == note.instr:
+					var on := time - pattern.onset(0) * bd
+					var tol := TOLERANCE * pattern.beats[0] * bd
+					found.append({"pattern": pattern, "lo": on - tol, "hi": on + tol})
+					best_k = 1
 	if best_k == 0:
 		if progress_step == 0:
 			note_judged.emit({"instr": note.instr, "t": time, "pattern": null, "step": 0,
 				"steps": 0, "rating": Rating.NONE, "offset": 0.0, "tolerance": 0.0})
 		_clear_progress()
 		return
-	var j := _judge(best, best_k, time, note)
-	note_judged.emit(j)
-	progress_pattern = best
+	progress_candidates = found
 	progress_step = best_k
-	_progress_lo = best_fit[0]
-	_progress_hi = best_fit[1]
-	progress_changed.emit(best, best_k, time)
+	progress_pattern = _leader(progress_pattern)
+	note_judged.emit(_judge(progress_pattern, best_k, time, note))
+	progress_changed.emit(progress_pattern, best_k, time)
+
+
+## The candidate shown as "the" incantation: `previous` while it is still one, else the
+## first in book order.
+func _leader(previous: RhythmPattern) -> RhythmPattern:
+	for c in progress_candidates:
+		if c.pattern == previous:
+			return previous
+	return progress_candidates[0].pattern if not progress_candidates.is_empty() else null
+
+
+## Every spell the incantation in progress could still become (book order).
+func candidate_patterns() -> Array[RhythmPattern]:
+	var out: Array[RhythmPattern] = []
+	for c in progress_candidates:
+		out.append(c.pattern)
+	return out
 
 
 ## Early/late judgement of the newest tap as note `step` (1-based) of `pattern`, measured
@@ -425,32 +455,50 @@ func _judge(pattern: RhythmPattern, step: int, time: float, note: Dictionary) ->
 	return j
 
 
-func _pattern_starting_with(instr: int) -> RhythmPattern:
-	for pattern in patterns:
-		if not pattern.syllables.is_empty() and pattern.syllables[0] == instr:
-			return pattern
-	return null
-
-
-## Why the newest tap broke the incantation in progress.
+## Why the newest tap broke the incantation in progress: a syllable no candidate expects,
+## else its timing against the candidate that expected that syllable (or the leader).
 func _break_reason(note: Dictionary, time: float) -> Dictionary:
-	var p := progress_pattern
+	var c: Dictionary = progress_candidates[0]
+	var wrong := true
+	for cand in progress_candidates:
+		if cand.pattern.syllables[progress_step] == note.instr:
+			c = cand
+			wrong = false
+			break
+		if cand.pattern == progress_pattern:
+			c = cand
+	var p: RhythmPattern = c.pattern
 	var bd := beat_duration()
-	var expected := (_progress_lo + _progress_hi) * 0.5 + p.onset(progress_step) * bd
+	var expected: float = (c.lo + c.hi) * 0.5 + p.onset(progress_step) * bd
 	var tol := TOLERANCE * p.beats[progress_step] * bd
 	var offset := time - expected
-	if note.instr != p.syllables[progress_step]:
+	if wrong:
 		return {"text": "wrong syllable", "offset": offset, "tolerance": tol}
 	return {"text": "too early" if offset < 0.0 else "too late", "offset": offset, "tolerance": tol}
 
 
-## Latest time the next note of the incantation in progress may arrive.
-func _progress_deadline() -> float:
-	var p := progress_pattern
+## Latest time candidate `c`'s next note may arrive.
+func _deadline(c: Dictionary) -> float:
+	var p: RhythmPattern = c.pattern
 	var bd := beat_duration()
 	var s := progress_step
 	var late_tol := TOLERANCE * p.beats[s] * bd if s < p.size() - 1 else 0.0
-	return _progress_hi + p.onset(s) * bd + late_tol
+	return c.hi + p.onset(s) * bd + late_tol
+
+
+## Candidates whose next note can no longer arrive in time drop out; the incantation fails
+## when none is left.
+func _drop_late_candidates(time: float) -> void:
+	var left: Array[Dictionary] = []
+	for c in progress_candidates:
+		if _deadline(c) > time:
+			left.append(c)
+	if left.is_empty():
+		_fail_progress("too late", time)
+		return
+	progress_candidates = left
+	progress_pattern = _leader(progress_pattern)
+	progress_changed.emit(progress_pattern, progress_step, time)
 
 
 func _fail_progress(reason: String, time: float) -> void:
@@ -463,6 +511,12 @@ func _fail_progress(reason: String, time: float) -> void:
 	progress_changed.emit(null, 0, time)
 
 
+## Drops the incantation in progress without a failure (new round).
+func clear_progress() -> void:
+	_clear_progress()
+
+
 func _clear_progress() -> void:
 	progress_pattern = null
 	progress_step = 0
+	progress_candidates.clear()

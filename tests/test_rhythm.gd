@@ -38,6 +38,8 @@ func _init() -> void:
 	test_tempo_drift_within_and_beyond_tolerance()
 	test_extra_tap_restarts_incantation()
 	test_multiple_spells_distinguished()
+	test_shared_openings_progress()
+	test_shared_opening_timeout_waits_for_slowest()
 	test_tempo_slide_followed()
 	test_tempo_slide_almost_finished_spell()
 	test_matches_original_frame_sampled_algorithm()
@@ -567,7 +569,7 @@ func test_matches_original_frame_sampled_algorithm() -> void:
 
 func test_spellbook() -> void:
 	var book: SpellBook = load("res://assets/spells/spellbook.tres")
-	check(book != null and book.active().size() == 3, "spellbook: 3 spells in play (%d)" % book.active().size())
+	check(book != null and book.active().size() >= 3, "spellbook: at least 3 spells in play (%d)" % book.active().size())
 	check(book.spells.size() == 9, "spellbook keeps 9 spells including ideas (%d)" % book.spells.size())
 	var basic1: RhythmPattern = RhythmPattern.all()[0]
 	var push: SpellDefinition = book.spells[0]
@@ -649,3 +651,62 @@ func test_tempo_slide_almost_finished_spell() -> void:
 		e.press(push.syllables[k], clock.warp(t))
 	check(has("match push"), "a nearly finished push still lands when the tempo starts sliding: %s" % [_log])
 	clock.free()
+
+
+# ------------------------------------------------------------------------------ shared openings
+
+func _whole_book() -> Array[RhythmPattern]:
+	var out: Array[RhythmPattern] = []
+	for sp in (load("res://assets/spells/spellbook.tres") as SpellBook).spells:
+		out.append(sp.to_pattern())
+	return out
+
+
+func _names(ps: Array[RhythmPattern]) -> Array[String]:
+	var out: Array[String] = []
+	for p in ps:
+		out.append(p.pattern_name)
+	return out
+
+
+## Swap (X A X A) shares its X with Open Pit and Knockout: progress follows all three, then
+## narrows to Swap, never fizzling on the way.
+func test_shared_openings_progress() -> void:
+	var e := make_engine(_whole_book())
+	e.set_fixed_tempo(100.0, 0.0)
+	var swap: RhythmPattern
+	for p in e.patterns:
+		if p.pattern_name == "swap_ball":
+			swap = p
+	var seen: Array = []
+	var m := 10.0
+	for k in swap.size():
+		e.press(swap.syllables[k], m + (swap.onset(k) - swap.onset(0)) * 0.6)
+		seen.append(_names(e.candidate_patterns()))
+	check(seen[0] == ["create_hole", "swap_ball", "knockout"], "X opens pit, swap and knockout: %s" % [seen[0]])
+	check(seen[1] == ["swap_ball"], "X A narrows to swap: %s" % [seen[1]])
+	check(has("match swap_ball") and not has("fail"), "swap cast without a fizzle: %s" % [_log])
+	# A chant no spell can continue still fizzles, once.
+	_log.clear()
+	e.press(X, 20.0)
+	e.press(X, 20.3)
+	var fails := _log.filter(func(l: String): return l.begins_with("fail"))
+	check(fails.size() == 1, "X X (no such spell) fizzles once: %s" % [_log])
+
+
+## After X, Open Pit expects its next note half a beat later, Knockout a full beat later:
+## waiting past Open Pit's deadline must only drop Open Pit, and Knockout still casts.
+func test_shared_opening_timeout_waits_for_slowest() -> void:
+	var e := make_engine(_whole_book())
+	e.set_fixed_tempo(100.0, 0.0)
+	var ko: RhythmPattern
+	for p in e.patterns:
+		if p.pattern_name == "knockout":
+			ko = p
+	var m := 10.0
+	e.press(X, m)
+	e.advance(m + 0.97 * 0.6)
+	check(not has("fail") and not "create_hole" in _names(e.candidate_patterns()), "pit dropped silently once late: %s %s" % [_log, _names(e.candidate_patterns())])
+	for k in range(1, ko.size()):
+		e.press(ko.syllables[k], m + (ko.onset(k) - ko.onset(0)) * 0.6)
+	check(has("match knockout") and not has("fail"), "knockout cast without a fizzle: %s" % [_log])

@@ -24,6 +24,7 @@ var _result_color := Color.WHITE
 var _result_time := -10.0
 var _progress_spell: SpellDefinition
 var _progress_step := 0
+var _candidates: Array[SpellDefinition] = []
 var _palette: Image
 
 
@@ -36,7 +37,8 @@ func setup(c: SpellCaster, player_title: String, pixel_font: Font, palette: Imag
 	caster.judged.connect(_on_judged)
 	caster.progress.connect(func(s: SpellDefinition, step: int, _n: int):
 		_progress_spell = s
-		_progress_step = step)
+		_progress_step = step
+		_candidates = caster.candidates())
 	caster.fizzled.connect(_on_fizzled)
 	caster.cast.connect(_on_cast)
 	custom_minimum_size = Vector2(108 + 54 + SHEET_W + GLYPH + 4, maxi(48, 6 + 15 * c.book.active().size()))
@@ -77,6 +79,7 @@ func _on_cast(spell: SpellDefinition) -> void:
 	_result_time = PlayerInput.now_seconds()
 	_progress_spell = spell
 	_progress_step = spell.syllables.size()
+	_candidates.clear()
 
 
 func _process(_delta: float) -> void:
@@ -146,7 +149,8 @@ func _draw() -> void:
 	for r in spells.size():
 		var s: SpellDefinition = spells[r]
 		var y := 3 + r * 15
-		var active := _progress_spell == s and _progress_step > 0 and now - _result_time >= 0.0
+		# Every spell the chant could still become is lit (they share their opening).
+		var active := _progress_step > 0 and (_progress_spell == s or s in _candidates)
 		var name_c := _palette.get_pixel(s.palette_index, 3) if active else Color(1, 1, 1, 0.6)
 		_text(Vector2(sx, y + 8), s.display_name.to_upper(), name_c)
 		var tx := sx + 54.0

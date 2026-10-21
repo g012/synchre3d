@@ -75,10 +75,15 @@ console). The camera follows both fighters and zooms out a little when they are 
    rhythm is checked relative to your own first syllable, as in the original. The right
    buttons in the wrong rhythm do not cast.
 3. **Read the feedback.** Gathered magic grows at your hands with each correct syllable, and
-   your character poses and bobs. The rhythm panel (bottom-left; P2 bottom-right) shows:
+   your character poses and bobs. While your syllables could still become several spells
+   (they share an opening, like X for Open Pit, Swap and Knockout), the magic is a pale,
+   shared glow with a small satellite in each possible spell's color; satellites fold into
+   it as the chant rules their spell out, and once one spell is left the glow morphs into
+   its color. It only fizzles when no spell can continue the chant. The rhythm panel (bottom-left; P2 bottom-right) shows:
    - your last syllables with a timing tick for each: centred = on time, shifted left or blue
      = early, right or orange = late, red cross = out of tolerance
-   - each spell's notes on a 4-beat timeline, lighting up as you play them
+   - each spell's notes on a 4-beat timeline, lighting up as you play them (every spell
+     still possible is lit)
    - the outcome: `PUSH!`, or a fizzle with its reason (`wrong syllable`, `too early`,
      `too late`, `tempo lost`). A fizzle dissipates the magic in grey puffs.
 
@@ -303,7 +308,7 @@ tools/        palette / sprite / font generators, blender/ build scripts
 godot --headless --path . -s tests/test_rhythm.gd
 ```
 
-The suite has 92 checks covering:
+The suite has 98 checks covering:
 
 - tempo lock time and BPM
 - tempo tolerance boundaries
@@ -322,6 +327,8 @@ The suite has 92 checks covering:
 - restarting an incantation
 - the spell book: every spell (ideas included) castable and never mistaken for another
 - tempo slides: a chant following a slide is cast, a nearly finished one still lands
+- shared openings: progress follows every possible spell, narrows without fizzling, drops a
+  spell whose next note is overdue without failing the others, and fizzles once when none fits
 - agreement with a line-by-line port of the original frame-sampled algorithm on 150
   randomized takes
 

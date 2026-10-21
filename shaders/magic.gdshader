@@ -8,6 +8,10 @@ render_mode unshaded, shadows_disabled, fog_disabled;
 #include "res://shaders/include/toon.gdshaderinc"
 
 uniform int palette_index = 15;
+// Dithered morph toward a second color (0 = palette_index, 1 = palette_index_b): gathered
+// magic turning from its shared color into one spell's.
+uniform int palette_index_b = 15;
+uniform float morph = 0.0;
 // 0..1: how charged the magic is (bigger white core, faster shimmer).
 uniform float energy = 0.5;
 // Flat rune rings: a glowing band near the edge of the quad instead of a sphere.
@@ -26,15 +30,16 @@ void fragment() {
 	}
 	float shimmer = (bayer4(FRAGCOORD.xy + vec2(floor(TIME * (8.0 + 10.0 * energy)))) - 0.5) * 0.22;
 	float v = facing + shimmer;
+	int pal = bayer4(FRAGCOORD.xy) < morph ? palette_index_b : palette_index;
 	vec3 c;
 	if (v > 0.9 - 0.3 * energy) {
 		c = palette_color(1, 3);
 	} else if (v > 0.5) {
-		c = palette_color(palette_index, 3);
+		c = palette_color(pal, 3);
 	} else if (v > 0.18) {
-		c = palette_color(palette_index, 2);
+		c = palette_color(pal, 2);
 	} else {
-		c = palette_color(palette_index, 1);
+		c = palette_color(pal, 1);
 	}
 	ALBEDO = c;
 	ROUGHNESS = MAT_GRASS;
