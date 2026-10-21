@@ -28,19 +28,46 @@ reflected_light_source = 1
 [sub_resource type="ShaderMaterial" id="post_mat"]
 render_priority = 100
 shader = ExtResource("4_post")
+shader_parameter/enabled = true
+shader_parameter/debug_view = 0
+shader_parameter/depth_threshold = 0.18
+shader_parameter/depth_slope_scale = 3.0
+shader_parameter/foliage_threshold = 0.9
+shader_parameter/outline_mul = Color(0.42, 0.36, 0.52, 1)
+shader_parameter/character_outline_mul = Color(0.26, 0.21, 0.34, 1)
+shader_parameter/convex_threshold = 0.5
+shader_parameter/light_dir_view = Vector3(0, 0.7, 0.7)
+shader_parameter/edge_light_min = 0.25
+shader_parameter/edge_strength = 0.38
+shader_parameter/edge_color = Color(1, 0.96, 0.82, 1)
+shader_parameter/sky_top = Color(0.47, 0.72, 0.86, 1)
+shader_parameter/sky_bottom = Color(0.8, 0.91, 0.9, 1)
+shader_parameter/sky_steps = 7.0
 
 [sub_resource type="QuadMesh" id="post_quad"]
 material = SubResource("post_mat")
 
 [sub_resource type="ShaderMaterial" id="m_terrain"]
+render_priority = 0
 shader = ExtResource("8_terrain")
+shader_parameter/dither = 0.1
+shader_parameter/patch_scale = 0.45
+shader_parameter/underside_fade_depth = 3.0
 
 [sub_resource type="ShaderMaterial" id="m_grass"]
+render_priority = 0
 shader = ExtResource("11_grass")
 shader_parameter/atlas = ExtResource("12_gatlas")
 shader_parameter/atlas_tiles = 8.0
+shader_parameter/sprite_texels = 16.0
+shader_parameter/patch_scale = 0.45
+shader_parameter/dither = 0.1
+shader_parameter/sway_amount = 0.11
+shader_parameter/bend_amount = 0.26
+shader_parameter/depth_bias = 0.06
 
 [sub_resource type="ShaderMaterial" id="m_fx"]
+render_priority = 0
 shader = ExtResource("14_fxsh")
 shader_parameter/atlas = ExtResource("15_fxatlas")
 shader_parameter/atlas_tiles = 4.0

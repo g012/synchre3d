@@ -1,7 +1,8 @@
 class_name ArenaCharacter
 extends CharacterBody3D
 ## A pushable arena fighter: screen-relative movement with inertia, a short-range push,
-## knockback with friction, and falling when the ground under it disappears.
+## knockback with friction, and falling when the ground under it disappears. Also used,
+## scaled down, for summoned minions (see SpellEffects).
 ##
 ## Support follows the arena's exact ground outline (the same function the shaders cut
 ## holes with): as soon as a grounded character's centre is over a hole or off the island
@@ -23,6 +24,15 @@ enum State { SPAWNING, ACTIVE, PUSHING, HITSTUN, FALLING, OUT, VICTORY, FROZEN }
 @export var color_index := 4
 ## Uniform scale applied to the model (collision is set in character.tscn).
 @export var model_scale := 1.15
+## Characters only shove / get hit by characters of another team (a fighter and their
+## minions share one).
+@export var team := 0
+## Height above the spawn point a character drops from.
+@export var spawn_height := 3.5
+## Starts fighting as soon as it lands (minions) instead of waiting for the round to start.
+@export var auto_activate := false
+## Permanent dithered darkening (0..1): summoned undead minions.
+@export var shade := 0.0
 
 @export_group("Movement")
 @export var move_speed := 5.0
@@ -47,7 +57,8 @@ enum State { SPAWNING, ACTIVE, PUSHING, HITSTUN, FALLING, OUT, VICTORY, FROZEN }
 @export var push_range := 1.2
 ## Half-angle of the push cone in degrees.
 @export var push_half_angle := 55.0
-@export var push_strength := 11.0
+## Kept below the Push spell's bolt so the spell is worth chanting.
+@export var push_strength := 7.5
 @export var push_cooldown := 0.45
 @export var push_windup := 0.07
 @export var push_active := 0.07
@@ -101,6 +112,9 @@ var _dash_t := 0.0
 var _dash_cd := 0.0
 var _dash_fx := 0.0
 var _air_dash_used := false
+## Seconds left knocked out: no control, still pushable.
+var _ko := 0.0
+var _ko_fx := 0.0
 ## Incantation visuals, driven by the SpellCaster: 0 = idle, 1 = last syllable reached.
 var cast_level := 0.0
 var _cast_pose := 0.0
@@ -109,6 +123,10 @@ var _cast_bob := 0.0
 const GROUND_MASK := Arena.LAYER_FLOOR | Arena.LAYER_OBSTACLES
 const FALL_MASK := Arena.LAYER_WALLS
 const RADIUS := 0.36
+const GROUP := &"arena_characters"
+## Squash spring sub-step: explicit integration of this stiff spring diverges past ~70 ms
+## per step (e.g. a frame hitch when the window regains focus), so long frames are split.
+const SPRING_STEP := 1.0 / 120.0
 
 
 func _ready() -> void:
@@ -117,6 +135,7 @@ func _ready() -> void:
 	floor_snap_length = 0.2
 	# Hills (up to ~43 deg) are walkable; mountain flanks are not.
 	floor_max_angle = deg_to_rad(47.0)
+	add_to_group(GROUP)
 	_build_visual()
 
 
@@ -145,7 +164,7 @@ func _build_visual() -> void:
 # ------------------------------------------------------------------ round control
 
 func spawn(at: Vector3, face: Vector3) -> void:
-	global_position = at + Vector3.UP * 3.5
+	global_position = at + Vector3.UP * spawn_height
 	velocity = Vector3.ZERO
 	facing = face.normalized()
 	_facing_angle = atan2(facing.x, facing.z)
@@ -161,6 +180,7 @@ func spawn(at: Vector3, face: Vector3) -> void:
 	_dash_t = 0.0
 	_dash_cd = 0.0
 	_air_dash_used = false
+	_ko = 0.0
 	cast_level = 0.0
 	_set_state(State.SPAWNING)
 	_visual.visible = true
@@ -184,7 +204,30 @@ func is_alive() -> bool:
 
 
 func is_controllable() -> bool:
-	return state == State.ACTIVE
+	return state == State.ACTIVE and _ko <= 0.0
+
+
+func is_knocked_out() -> bool:
+	return _ko > 0.0
+
+
+## Can't move, push, jump or dash for `seconds`; still pushed around (and still chants).
+func knock_out(seconds: float) -> void:
+	if not is_alive():
+		return
+	_ko = maxf(_ko, seconds)
+	_dash_t = 0.0
+	_squash_vel += 8.0
+
+
+## Alive characters of other teams (fighters and minions).
+func enemies() -> Array[ArenaCharacter]:
+	var out: Array[ArenaCharacter] = []
+	for n in get_tree().get_nodes_in_group(GROUP):
+		var c := n as ArenaCharacter
+		if c and c.team != team and c.is_alive() and c.state != State.SPAWNING:
+			out.append(c)
+	return out
 
 
 func _set_state(s: State) -> void:
@@ -202,9 +245,10 @@ func _physics_process(delta: float) -> void:
 	_cooldown = maxf(_cooldown - delta, 0.0)
 	_jump_buffer = maxf(_jump_buffer - delta, 0.0)
 	_dash_cd = maxf(_dash_cd - delta, 0.0)
+	_ko = maxf(_ko - delta, 0.0)
 	if brain:
 		brain.update(self, delta)
-		if brain.wants_jump(self):
+		if brain.wants_jump(self) and _ko <= 0.0:
 			_jump_buffer = 0.12
 
 	match state:
@@ -217,8 +261,15 @@ func _physics_process(delta: float) -> void:
 				if fx:
 					fx.dust_ring(global_position, 6)
 				landed.emit(self)
-				_set_state(State.FROZEN)
+				_set_state(State.ACTIVE if auto_activate else State.FROZEN)
 		State.ACTIVE:
+			if _ko > 0.0:
+				var h := Vector2(velocity.x, velocity.z).move_toward(Vector2.ZERO, deceleration * delta)
+				velocity.x = h.x
+				velocity.z = h.y
+				_ko_stars(delta)
+				_apply_gravity_and_move(delta)
+				return
 			if _dash_t > 0.0:
 				# Committed burst: no steering until it ends, then normal braking takes over.
 				_dash_t -= delta
@@ -240,6 +291,8 @@ func _physics_process(delta: float) -> void:
 			velocity.z = h.y
 			if _state_time > hitstun_time:
 				_set_state(State.ACTIVE)
+			if _ko > 0.0:
+				_ko_stars(delta)
 			_apply_gravity_and_move(delta)
 		State.FALLING:
 			_fall_time += delta
@@ -342,6 +395,16 @@ func _dash_trail(delta: float) -> void:
 		fx.puff(global_position + Vector3.UP * 0.12 - facing * 0.25, 0.6)
 
 
+## Little stars circling the head while knocked out.
+func _ko_stars(delta: float) -> void:
+	_ko_fx -= delta
+	if fx and _ko_fx <= 0.0:
+		_ko_fx = 0.12
+		var a := _anim_time * 7.0
+		var p := global_position + Vector3(cos(a) * 0.3, 1.05 * model_scale, sin(a) * 0.3)
+		fx.spawn(p, Vector3(-sin(a), 0.1, cos(a)) * 1.2, 0.3, FxSprites.TILE_STAR, 6, 2, 5.0, 2.0, 0.0, 2.0)
+
+
 ## Starts a buffered jump if standing on the ground.
 func _try_jump() -> void:
 	if _jump_buffer <= 0.0 or not is_on_floor():
@@ -436,27 +499,33 @@ func _update_push(delta: float) -> void:
 		_set_state(State.ACTIVE)
 
 
+## Shoves the nearest enemy (fighter or minion) inside the push cone.
 func _resolve_push() -> void:
-	var hit := false
-	if opponent and opponent.is_alive() and opponent.state != State.SPAWNING:
-		var to := opponent.global_position - global_position
+	var target: ArenaCharacter = null
+	var best := INF
+	for e in enemies():
+		var to := e.global_position - global_position
 		to.y = 0.0
 		var dist := to.length()
 		var angle := rad_to_deg(facing.angle_to(to.normalized())) if dist > 0.001 else 0.0
-		if dist <= push_range and angle <= push_half_angle:
-			hit = true
-			var dir := (facing * 0.65 + to.normalized() * 0.35).normalized()
-			opponent.receive_push(dir, push_strength, self)
-			velocity.x = -facing.x * recoil_speed
-			velocity.z = -facing.z * recoil_speed
-			_hitstop = hitstop_time
-			if fx:
-				fx.impact(global_position.lerp(opponent.global_position, 0.6) + Vector3.UP * 0.45, dir)
-			if camera:
-				camera.shake(0.22)
-	if not hit and fx:
+		if dist <= push_range and angle <= push_half_angle and dist < best:
+			best = dist
+			target = e
+	if target:
+		var to := target.global_position - global_position
+		to.y = 0.0
+		var dir := (facing * 0.65 + to.normalized() * 0.35).normalized()
+		target.receive_push(dir, push_strength, self)
+		velocity.x = -facing.x * recoil_speed
+		velocity.z = -facing.z * recoil_speed
+		_hitstop = hitstop_time
+		if fx:
+			fx.impact(global_position.lerp(target.global_position, 0.6) + Vector3.UP * 0.45, dir)
+		if camera:
+			camera.shake(0.22 * clampf(push_strength / 7.5, 0.3, 1.0))
+	elif fx:
 		fx.whoosh(global_position + facing * 0.5 + Vector3.UP * 0.35, facing)
-	pushed.emit(self, opponent, hit)
+	pushed.emit(self, target, target != null)
 
 
 func receive_push(dir: Vector3, strength: float, _attacker: ArenaCharacter) -> void:
@@ -510,9 +579,16 @@ func _process(delta: float) -> void:
 	_visual.global_position = pos
 	_visual.rotation = Vector3(0.0, _facing_angle + _spin, 0.0)
 
-	# Squash & stretch spring.
-	_squash_vel += (-320.0 * _squash - 15.0 * _squash_vel) * delta
-	_squash += _squash_vel * delta
+	# Squash & stretch spring, sub-stepped so a long frame can't make it diverge.
+	var left := minf(delta, 0.25)
+	while left > 0.0:
+		var h := minf(left, SPRING_STEP)
+		_squash_vel += (-320.0 * _squash - 15.0 * _squash_vel) * h
+		_squash += _squash_vel * h
+		left -= h
+	if not is_finite(_squash) or not is_finite(_squash_vel):
+		_squash = 0.0
+		_squash_vel = 0.0
 	var s := clampf(_squash * 0.06, -0.35, 0.35)
 	_pivot.scale = Vector3(1.0 + s * 0.6, 1.0 - s, 1.0 + s * 0.6)
 
@@ -524,7 +600,7 @@ func _process(delta: float) -> void:
 		sink = clampf(-pos.y / 1.3, 0.0, 1.0)
 	for mi in _meshes:
 		mi.set_instance_shader_parameter("flash", flash_value)
-		mi.set_instance_shader_parameter("sink", sink)
+		mi.set_instance_shader_parameter("sink", maxf(sink, shade))
 
 	_animate_parts(delta)
 	_emit_dust(delta)
@@ -596,6 +672,13 @@ func _animate_parts(delta: float) -> void:
 			hand_r = Vector3(-0.05, 0.25, 0.0)
 			_squash = minf(_squash, -1.5)
 
+	# Knocked out: slumped, eyes shut, arms dangling, head lolling.
+	if _ko > 0.0 and state in [State.ACTIVE, State.HITSTUN]:
+		eye_scale = 0.12
+		target_lean = -0.12
+		hand_l = Vector3(0.03, -0.06, -0.02)
+		hand_r = Vector3(-0.03, -0.06, -0.02)
+		head_rot = Vector3(0.15, 0.0, sin(_anim_time * 3.0) * 0.25)
 	# Dash: lean hard into the burst, arms swept back.
 	if _dash_t > 0.0 and state == State.ACTIVE:
 		target_lean = 0.55
@@ -629,7 +712,7 @@ func _animate_parts(delta: float) -> void:
 	_blink_timer -= delta
 	if _blink_timer < 0.0:
 		_blink_timer = randf_range(2.0, 4.5)
-	if _blink_timer < 0.11 and state != State.FALLING and state != State.HITSTUN:
+	if _blink_timer < 0.11 and state != State.FALLING and state != State.HITSTUN and _ko <= 0.0:
 		eye_scale = 0.15
 
 	_pose("FootL", foot_l, Vector3.ZERO, Vector3.ONE, delta)
@@ -676,5 +759,7 @@ func _mcp_state() -> Dictionary:
 		"vel": [snappedf(velocity.x, 0.01), snappedf(velocity.y, 0.01), snappedf(velocity.z, 0.01)],
 		"facing_deg": snappedf(rad_to_deg(_facing_angle), 0.1),
 		"cooldown": snappedf(_cooldown, 0.01),
+		"ko": snappedf(_ko, 0.01),
+		"squash": snappedf(_squash, 0.01),
 		"ground_sdf": snappedf(arena.ground_sdf(Vector2(global_position.x, global_position.z)), 0.01) if arena else 0.0,
 	}

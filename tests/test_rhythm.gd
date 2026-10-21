@@ -38,6 +38,8 @@ func _init() -> void:
 	test_tempo_drift_within_and_beyond_tolerance()
 	test_extra_tap_restarts_incantation()
 	test_multiple_spells_distinguished()
+	test_tempo_slide_followed()
+	test_tempo_slide_almost_finished_spell()
 	test_matches_original_frame_sampled_algorithm()
 	test_spellbook()
 	print("\n%d checks, %d failures" % [_checks, _failures])
@@ -565,7 +567,8 @@ func test_matches_original_frame_sampled_algorithm() -> void:
 
 func test_spellbook() -> void:
 	var book: SpellBook = load("res://assets/spells/spellbook.tres")
-	check(book != null and book.spells.size() == 3, "spellbook loads with 3 spells")
+	check(book != null and book.active().size() == 3, "spellbook: 3 spells in play (%d)" % book.active().size())
+	check(book.spells.size() == 9, "spellbook keeps 9 spells including ideas (%d)" % book.spells.size())
 	var basic1: RhythmPattern = RhythmPattern.all()[0]
 	var push: SpellDefinition = book.spells[0]
 	check(push.button_string() == "A B X Y A", "push is ABXYA (%s)" % push.button_string())
@@ -574,9 +577,75 @@ func test_spellbook() -> void:
 		var p := s.to_pattern()
 		check(is_equal_approx(p.length(), 4.0), "%s fills one 4-beat measure" % s.id)
 		check(p.syllables.size() == p.beats.size(), "%s: one button per note" % s.id)
-	# Every spell is castable through the engine at 100 bpm.
-	for i in book.spells.size():
-		var e := make_engine(book.patterns())
+	# Every spell of the whole book (ideas enabled too) is castable at 100 bpm and is never
+	# mistaken for another one.
+	var all: Array[RhythmPattern] = []
+	for s in book.spells:
+		all.append(s.to_pattern())
+	for i in all.size():
+		var e := make_engine(all)
 		var m := count_in(e, 0.0, 0.6)
-		play(e, e.patterns[i], m, 0.6)
-		check(has("match %s" % book.spells[i].id), "%s recognized: %s" % [book.spells[i].id, _log])
+		play(e, all[i], m, 0.6)
+		var matches := _log.filter(func(l: String): return l.begins_with("match"))
+		check(matches.size() == 1 and matches[0].begins_with("match %s @" % book.spells[i].id), "%s recognized alone: %s" % [book.spells[i].id, matches])
+
+# ------------------------------------------------------------------------------ tempo slides
+
+## A clock at 100 bpm (origin 0) sliding to 120 over 4 beats from beat 8, and an engine fed
+## warped timestamps (as SpellCaster does).
+func _sliding_setup() -> Array:
+	var clock := BeatClock.new()
+	clock.metronome = false
+	clock.start(100.0, 0.0)
+	var e := make_engine(load("res://assets/spells/spellbook.tres").patterns())
+	e.set_fixed_tempo(100.0, 0.0)
+	_log.clear()
+	return [clock, e]
+
+
+## Time at which `clock` reaches `beat` (bisection; the map is monotonic).
+func _time_at(clock: BeatClock, beat: float) -> float:
+	var lo := 0.0
+	var hi := 100.0
+	for k in 60:
+		var mid := (lo + hi) * 0.5
+		if clock.beats_at(mid) < beat:
+			lo = mid
+		else:
+			hi = mid
+	return (lo + hi) * 0.5
+
+
+func test_tempo_slide_followed() -> void:
+	var r := _sliding_setup()
+	var clock: BeatClock = r[0]
+	var e: RhythmEngine = r[1]
+	clock.slide_to(120.0, 4.0, 4.8)
+	check(is_equal_approx(clock.bpm_at(4.7), 100.0) and is_equal_approx(clock.bpm_at(100.0), 120.0), "slide: 100 before, 120 after")
+	check(clock.bpm_at(5.8) > 100.0 and clock.bpm_at(5.8) < 120.0, "slide is gradual (%s)" % clock.bpm_at(5.8))
+	check(is_equal_approx(clock.warp(3.0), 3.0), "warp is identity before any slide")
+	# A push played on the sliding beat (starting mid-slide) is recognized.
+	var push: RhythmPattern = e.patterns[0]
+	for k in push.size():
+		var t := _time_at(clock, 9.0 + push.onset(k) - push.onset(0))
+		e.press(push.syllables[k], clock.warp(t))
+	check(has("match push"), "push following the slide is cast: %s" % [_log])
+	# Long after the slide, 120 bpm beats map to whole match-tempo beats.
+	var t0 := _time_at(clock, 40.0)
+	check(is_equal_approx(clock.warp(t0 + 0.5) - clock.warp(t0), 0.6), "after the slide a 120 bpm beat counts as one beat")
+	clock.free()
+
+
+func test_tempo_slide_almost_finished_spell() -> void:
+	var r := _sliding_setup()
+	var clock: BeatClock = r[0]
+	var e: RhythmEngine = r[1]
+	# Push started at beat 8 at 100 bpm; the opponent's slide lands just after its 4th note.
+	var push: RhythmPattern = e.patterns[0]
+	for k in push.size():
+		var t := 4.8 + (push.onset(k) - push.onset(0)) * 0.6
+		if k == push.size() - 1:
+			clock.slide_to(120.0, 4.0, 4.8 + 2.05 * 0.6)
+		e.press(push.syllables[k], clock.warp(t))
+	check(has("match push"), "a nearly finished push still lands when the tempo starts sliding: %s" % [_log])
+	clock.free()

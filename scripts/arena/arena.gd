@@ -357,8 +357,20 @@ func _grow(m: Dictionary) -> void:
 	m.t = 0.0
 
 
+## Sinks mound `m` one level (mountain -> hill -> bump -> flat; a flattened mound is removed
+## once it has settled). Returns {"mound": m} or {"error": reason}.
+func lower_mound(m: Dictionary) -> Dictionary:
+	if m.level <= 0:
+		return {"error": "already flat"}
+	m.from = Vector3(m.radius, m.height, m.sharp)
+	m.level -= 1
+	m.to = MOUND_LEVELS[m.level - 1] if m.level > 0 else Vector3(m.radius, 0.0, 0.0)
+	m.t = 0.0
+	return {"mound": m}
+
+
 func _mound_rect(m: Dictionary) -> Rect2:
-	var r: float = maxf(m.radius, m.to.x) * 1.17 + HM_SPACING
+	var r: float = maxf(maxf(m.radius, m.to.x), m.from.x) * 1.17 + HM_SPACING
 	return Rect2(m.center - Vector2(r, r), Vector2(r, r) * 2.0)
 
 
@@ -388,22 +400,29 @@ func _process(delta: float) -> void:
 			hole_opened.emit(h)
 	var grown_rect := Rect2()
 	var grew := false
+	var flattened: Array[Dictionary] = []
 	for m in mounds:
 		if m.t >= 1.0:
 			continue
 		m.t = minf(m.t + delta / MOUND_GROW_TIME, 1.0)
-		# Overshoots a little, like earth heaving up and settling.
-		var e := 1.0 - pow(1.0 - m.t, 3.0) + sin(m.t * PI) * 0.12
+		# Rising overshoots a little, like earth heaving up and settling; sinking doesn't.
+		var e := 1.0 - pow(1.0 - m.t, 3.0)
+		if m.to.y > m.from.y:
+			e += sin(m.t * PI) * 0.12
 		var v: Vector3 = m.from.lerp(m.to, e)
-		m.radius = v.x
-		m.height = v.y
+		m.radius = maxf(v.x, 0.0)
+		m.height = maxf(v.y, 0.0)
 		m.sharp = clampf(v.z, 0.0, 1.0)
 		var r := _mound_rect(m)
 		grown_rect = r if not grew else grown_rect.merge(r)
 		grew = true
 		_features_dirty = true
 		if m.t >= 1.0:
+			if m.level <= 0:
+				flattened.append(m)
 			mound_raised.emit(m)
+	for m in flattened:
+		mounds.erase(m)
 	if grew:
 		_mound_dirty = grown_rect if not _has_mound_dirty else _mound_dirty.merge(grown_rect)
 		_has_mound_dirty = true

@@ -110,7 +110,7 @@ func set_mode(two_player: bool) -> void:
 
 
 ## One rhythm readout per human caster: P1 bottom-left, P2 bottom-right.
-func set_rhythm_panels(casters: Array[SpellCaster]) -> void:
+func set_rhythm_panels(casters: Array[SpellCaster], titles: Array[String] = []) -> void:
 	for p in _panels:
 		p.queue_free()
 	_panels.clear()
@@ -118,7 +118,7 @@ func set_rhythm_panels(casters: Array[SpellCaster]) -> void:
 		if casters[i] == null:
 			continue
 		var panel := RhythmPanel.new()
-		panel.setup(casters[i], "P%d" % (i + 1), _font, _palette)
+		panel.setup(casters[i], titles[i] if i < titles.size() else "P%d" % (i + 1), _font, _palette)
 		_root.add_child(panel)
 		_panels.append(panel)
 	_layout()

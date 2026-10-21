@@ -5,7 +5,8 @@ cohesive 3D pixel art (in the spirit of t3ssel8r's work). Two little characters 
 grassy island fight by casting spells: you move and jump freely while chanting incantations
 as rhythmic sequences of A/B/X/Y presses. A Push spell blasts your rival toward the holes,
 Open Pit tears a new hole in the ground, and Mend Earth closes one, or raises the ground into
-a bump, a hill and finally a mountain. A plain melee shove (RB) is always at hand too.
+a bump, a hill and finally a mountain. A plain melee shove (RB) is always at hand too, weaker
+than the Push spell. More spells wait in the [spell book](docs/spellbook.md).
 
 ## Running
 
@@ -33,7 +34,7 @@ Project Settings.
 | Shove (melee push) | RB | E | Numpad . |
 | Dash (toward the stick, else forward; 0.65 s cooldown, one per jump in the air) | LB | Left Shift | Numpad + |
 | Switch 1P ⇄ 2P (new game: scores reset, tempo chosen again) | Back | Tab | |
-| Restart round / confirm the tempo | Start | R | |
+| Restart round | Start | R | |
 | Fullscreen / debug: hide outline pass | | F11 / F1 | |
 
 Keyboard keys are bound by physical position, so they work the same on AZERTY. In 1-player
@@ -56,18 +57,18 @@ console). The camera follows both fighters and zooms out a little when they are 
 
 1. **Player 1 sets the tempo, once, before the match.** The game opens on `SET THE TEMPO`:
    tap any face button four times evenly (the original Synchre count-in rule: the taps and
-   the wait after them within ±20%). The tempo is clamped to **80–160 BPM** (the screen
-   says so if your taps were outside). Tap again to change it, then press **Start / R** to
-   fight. That tempo is shared by both players and by everything that moves to the music
-   (metronome, dancing flowers) for the whole match. It never resets; switching 1P/2P starts
-   a new game and asks again.
+   the wait after them within ±20%). The tempo is clamped to **80–160 BPM**, and the match
+   starts the moment it locks. That tempo is shared by both players, the CPU and everything
+   that moves to the music (metronome, dancing flowers) for the whole match; switching 1P/2P
+   starts a new game and asks again. (Tempo spells from the book can slide it; each round
+   starts back at the match tempo.)
 2. **Chant.** Each spell is one measure (4 beats) of syllables in a set rhythm:
 
    | Spell | Buttons | Rhythm (beats before each note) | Effect |
    |---|---|---|---|
-   | **Push** | A B X Y A | 1, ½, ½, 1, 1 (the original `basic1` pattern) | A bolt from your hands shoves the first rival it touches with the usual knockback |
-   | **Open Pit** | X Y X Y | 1½, ½, 1½, ½ (the original `basic2` pattern) | Opens a real hole about 2.4 units in front of you |
-   | **Mend Earth** | B Y B Y A | 1, 1, ½, ½, 1 | Closes the hole nearest to the spot in front of you. With no hole in reach it raises the ground 2.2 units ahead into a **bump**; cast it again at that mound for a **hill**, and again for a **mountain**. Rising ground throws anyone standing on it outward (harder at each level); the caster just rides it. |
+   | **Push** | A B X Y A | 1, ½, ½, 1, 1 (the original `basic1` pattern) | A big, fast ball of light from your hands shoves the first rival it touches, about twice as far as the RB shove |
+   | **Open Pit** | X Y X Y | 1½, ½, 1½, ½ (the original `basic2` pattern) | Digs in front of you: a mountain sinks to a hill, a hill to a bump, a bump to flat ground, and only flat ground opens into a real hole (about 2.4 units ahead) |
+   | **Mend Earth** | B Y B Y A | 1, 1, ½, ½, 1 | Closes the nearest hole in a cone in front of you (not the ones at your sides). With no hole there it raises the ground 2.2 units ahead into a **bump**; cast it again at that mound for a **hill**, and again for a **mountain**. Rising ground throws anyone standing on it outward (harder at each level); the caster just rides it. |
 
    Every note must land within 20% of its own duration, measured against the match tempo.
    **A spell can start on any beat** (or between beats): there is no bar to wait for, the
@@ -95,7 +96,10 @@ bop on the beat too.
 Bumps and hills are walkable. Mountain flanks are too steep to climb, and they stop Push
 bolts, which otherwise glide over gentle slopes. Holes can be opened through a hill.
 
-The CPU opponent uses the melee shove only; it does not chant.
+The CPU opponent chants too (easy for now): every few seconds it picks a spell that suits
+the situation (Push at range, Open Pit when you're a couple of steps ahead, Mend Earth near
+a hole), presses the syllables on the beat with a little wobble, and now and then flubs a
+syllable and fizzles. Its rhythm panel is shown bottom-right, so you can read what's coming.
 
 ## What's in the box
 
@@ -222,8 +226,9 @@ Each stage only talks to the next one through plain data or signals:
    (buttons, note durations, effect, color). Adding a spell means adding a resource; no
    recognition code changes.
 5. **Execution** — `scripts/spells/spell_effects.gd` resolves a completed spell against the
-   arena: `MagicBolt` for Push; `Arena.open_hole()` / `close_hole()` / `raise_ground()` /
-   `grow_mound()` for Open Pit and Mend Earth, including the knockback from rising ground.
+   arena: `MagicBolt` for Push (and Swap / Knockout); `Arena.open_hole()` / `close_hole()` /
+   `raise_ground()` / `grow_mound()` / `lower_mound()` for Open Pit and Mend Earth, including
+   the knockback from rising ground; minions, shockwave and tempo slides for the book spells.
    It is the only spell code that touches gameplay.
 6. **Feedback** — `scripts/spells/spell_caster.gd` drives the gathering `MagicOrb`, the hand
    pose, the syllable voices (played the instant a button is pressed), the metronome (the
@@ -258,9 +263,10 @@ Spell effects are separate from recognition and could be resolved authoritativel
 | Spells (buttons, rhythm, effect, color) | `assets/spells/spellbook.tres` |
 | Pit radius and placement, Mend Earth reach, mound distance and knockback | Exported vars on `scripts/spells/spell_effects.gd` |
 | Sounds | `python3 tools/gen_audio.py` (numpy), volumes on `spell_caster.gd` / `spell_effects.gd` |
-| Push bolt speed, range, hit radius | `scripts/spells/magic_bolt.gd` |
+| Push bolt speed, range, size, strength | `scripts/spells/magic_bolt.gd` |
 | Rhythm tolerance, blank length, tempo from spell openings | `scripts/rhythm/rhythm_engine.gd` (`TOLERANCE` as in the original; `blank_beats`, `tempo_from_openings`) |
-| AI reaction time and edge fear | `scripts/character/ai_brain.gd` |
+| AI reaction time, edge fear, chanting rate / timing wobble / flub chance | `scripts/character/ai_brain.gd` |
+| Which spells are in play; book spell numbers | `enabled` in `assets/spells/spellbook.tres`; see `docs/spellbook.md` |
 | Pixel density (world units per pixel), camera angle and focus | `scripts/render/pixel_camera.gd` |
 | Outline and highlight thresholds and colors, sky | Uniforms in `shaders/post_outline.gdshader` |
 | Colors | `assets/palette/palette.json`, then run `python3 tools/gen_palette.py` |
@@ -297,7 +303,7 @@ tools/        palette / sprite / font generators, blender/ build scripts
 godot --headless --path . -s tests/test_rhythm.gd
 ```
 
-The suite has 67 checks covering:
+The suite has 92 checks covering:
 
 - tempo lock time and BPM
 - tempo tolerance boundaries
@@ -314,7 +320,8 @@ The suite has 67 checks covering:
 - rapid successive casts and consumed taps
 - tempo drift within and beyond tolerance
 - restarting an incantation
-- the spellbook
+- the spell book: every spell (ideas included) castable and never mistaken for another
+- tempo slides: a chant following a slide is cast, a nearly finished one still lands
 - agreement with a line-by-line port of the original frame-sampled algorithm on 150
   randomized takes
 
@@ -349,15 +356,19 @@ Built and tested against Godot 4.7.2 and Blender 5.2.1:
   the match with both casters on the shared tempo; a Push started mid-bar (off the beat)
   cast; LB dashed (5.6 units in 0.73 s vs ~3.3 walking) and a second press within the
   cooldown was ignored; Tab returned to the tempo screen.
+- Spell book round: 4 taps at 600 ms started the match at once at 100 BPM; the CPU's chanted
+  syllables all landed within tolerance (worst 66 ms of a 120 ms window) and it cast Push,
+  Open Pit and Mend Earth; shove knockback 1.6 units vs 3.3 for the Push ball; Mend Earth
+  closed the hole in front and ignored one at the side; three Open Pits took a mountain down
+  to flat ground and a fourth opened a hole; Shockwave, Knockout (input blocked, still
+  pushable), Swap, Raise Minion (crumbled after 9.61 s = 16 beats at 100 BPM) and Hasten
+  (100 → 120 over one bar, then a Push chanted by pad at 120) all worked; the squash spring
+  stays stable through 1-second frames (the focus-out bug).
 
 Not verified:
 
-- **Real controller:** a physical Xbox pad. Inputs were simulated through Godot's input
-  pipeline, so the stick deadzone feel, the RT threshold on real hardware and the timing
-  latency of an actual pad are untested.
-- **Playtesting:** human timing comfort and AI difficulty. The rhythm tolerances are the
-  original's; the AI reaction time is the main difficulty knob. The AI does not use hills
-  tactically; it only avoids steep slopes.
+- **Playtesting:** the game is playtested on a real pad by the user. The AI does not use
+  hills tactically; it only avoids steep slopes.
 - **Sound:** the generated sounds were checked by pitch, level and spectrogram, not by ear.
 - **Platforms:** other GPUs and operating systems.
 

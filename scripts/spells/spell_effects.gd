@@ -8,6 +8,7 @@ extends Node3D
 signal resolved(caster: ArenaCharacter, spell: SpellDefinition, ok: bool, note: String)
 
 const RUNE_SHADER := preload("res://shaders/magic.gdshader")
+const CHARACTER_SCENE := preload("res://scenes/character.tscn")
 const SOUNDS := {
 	"push": preload("res://assets/audio/spell_push.wav"),
 	"pit": preload("res://assets/audio/spell_pit.wav"),
@@ -20,15 +21,31 @@ const SOUNDS := {
 @export var pit_radius := 0.85
 ## Distances in front of the caster where Open Pit tries to open, in order.
 @export var pit_distances := PackedFloat32Array([2.4, 2.0, 2.9, 1.7])
-## How far in front of the caster Mend Earth looks for a hole, and its reach.
-@export var mend_probe := 1.6
-@export var mend_reach := 2.6
+## Mend Earth closes the nearest hole inside a cone in front of the caster: this half-angle
+## (degrees, widened by the hole's own size as seen from the caster) and this reach
+## (to the hole's rim).
+@export var mend_cone := 25.0
+@export var mend_reach := 3.6
 ## With no hole in reach, Mend Earth raises the ground this far ahead (a bump, then a hill,
 ## then a mountain when cast again on the same spot).
 @export var raise_distance := 2.2
 ## Knockback given to characters standing where a mound rises, per level.
 @export var raise_push := PackedFloat32Array([7.0, 9.5, 12.5])
 @export var sound_volume_db := -3.0
+
+@export_group("Book spells")
+## Hasten / Slow: BPM change, and how many beats the slide takes.
+@export var tempo_step := 20.0
+@export var tempo_slide_beats := 4.0
+## Raise Minion: lifetime in beats, size and shove.
+@export var minion_beats := 16.0
+@export var minion_scale := 0.62
+@export var minion_push := 4.5
+## Shockwave: reach around the caster and knockback (at the centre; 55% at the rim).
+@export var shockwave_radius := 3.4
+@export var shockwave_push := 14.0
+## Knockout: beats the target stays down.
+@export var knockout_beats := 4.0
 
 var arena: Arena
 var fx: FxSprites
@@ -40,6 +57,8 @@ var _animating := {}
 var _debris_timer := 0.0
 # Mounds currently rising because of a spell: id -> { caster, palette, pushed: {character: true} }.
 var _rising := {}
+# Summoned minions: minion -> beat (BeatClock) at which it crumbles.
+var _minions := {}
 var _sfx: AudioStreamPlayer
 
 
@@ -65,11 +84,23 @@ func cast(spell: SpellDefinition, caster: ArenaCharacter, origin: Vector3) -> vo
 		return
 	match spell.effect:
 		SpellDefinition.Effect.PUSH:
-			_cast_push(spell, caster, origin)
+			_cast_bolt(spell, caster, origin, MagicBolt.Kind.PUSH)
 		SpellDefinition.Effect.CREATE_HOLE:
 			_cast_open_pit(spell, caster)
 		SpellDefinition.Effect.CLOSE_HOLE:
 			_cast_mend(spell, caster)
+		SpellDefinition.Effect.TEMPO_UP:
+			_cast_tempo(spell, caster, tempo_step)
+		SpellDefinition.Effect.TEMPO_DOWN:
+			_cast_tempo(spell, caster, -tempo_step)
+		SpellDefinition.Effect.RAISE_MINION:
+			_cast_minion(spell, caster)
+		SpellDefinition.Effect.SHOCKWAVE:
+			_cast_shockwave(spell, caster)
+		SpellDefinition.Effect.SWAP_BALL:
+			_cast_bolt(spell, caster, origin, MagicBolt.Kind.SWAP)
+		SpellDefinition.Effect.KNOCKOUT:
+			_cast_bolt(spell, caster, origin, MagicBolt.Kind.KNOCKOUT)
 
 
 ## Removes in-flight spells (new round).
@@ -79,31 +110,62 @@ func clear() -> void:
 			c.queue_free()
 	_animating.clear()
 	_rising.clear()
+	_minions.clear()
 
 
-func _cast_push(spell: SpellDefinition, caster: ArenaCharacter, origin: Vector3) -> void:
+## Push: a big fast ball of light. Swap: a small, very fast ball. Knockout: a spinning star.
+func _cast_bolt(spell: SpellDefinition, caster: ArenaCharacter, origin: Vector3, kind: MagicBolt.Kind) -> void:
 	var bolt := MagicBolt.new()
+	bolt.kind = kind
 	bolt.caster = caster
-	bolt.targets = characters
 	bolt.arena = arena
 	bolt.fx = fx
 	bolt.camera = camera
 	bolt.direction = caster.facing.normalized()
-	bolt.strength = caster.push_strength * 1.05
 	bolt.palette_index = spell.palette_index
+	match kind:
+		MagicBolt.Kind.SWAP:
+			bolt.radius = 0.13
+			bolt.speed = 24.0
+			bolt.hit_radius = 0.55
+			bolt.max_range = 10.0
+		MagicBolt.Kind.KNOCKOUT:
+			bolt.radius = 0.24
+			bolt.speed = 13.0
+			bolt.hit_radius = 0.7
+			bolt.max_range = 8.0
+			bolt.stun_time = knockout_beats * _beat_seconds()
 	add_child(bolt)
 	bolt.global_position = origin
 	# Recoil sells the release.
-	caster.velocity -= caster.facing * 1.5
+	caster.velocity -= caster.facing * (1.5 if kind == MagicBolt.Kind.PUSH else 0.6)
 	if camera:
-		camera.shake(0.08)
-	_sound("push")
+		camera.shake(0.1 if kind == MagicBolt.Kind.PUSH else 0.05)
+	_sound("push", 1.0 if kind == MagicBolt.Kind.PUSH else 1.5)
 	resolved.emit(caster, spell, true, "")
 
 
+## Seconds per beat right now (shared tempo), 0.6 without one.
+func _beat_seconds() -> float:
+	var clock := BeatClock.instance
+	return 60.0 / clock.current_bpm() if clock and clock.running else 0.6
+
+
+## Digs in front: a mound there sinks one level (mountain -> hill -> bump -> flat); only flat
+## ground opens into a pit.
 func _cast_open_pit(spell: SpellDefinition, caster: ArenaCharacter) -> void:
 	var here := Vector2(caster.global_position.x, caster.global_position.z)
 	var dir := Vector2(caster.facing.x, caster.facing.z).normalized()
+	var mound := _mound_in_front(here, dir)
+	if not mound.is_empty() and not arena.lower_mound(mound).has("error"):
+		_rune(mound.center, mound.radius * 1.05, spell.palette_index)
+		if fx:
+			fx.dust_ring(Vector3(mound.center.x, arena.height_at(mound.center) + 0.05, mound.center.y), 8 + 3 * mound.level)
+		if camera:
+			camera.shake(0.12)
+		_sound("pit", 0.85)
+		resolved.emit(caster, spell, true, "")
+		return
 	for d in pit_distances:
 		var c := here + dir * d
 		var id := arena.open_hole(c, pit_radius)
@@ -124,7 +186,7 @@ func _cast_open_pit(spell: SpellDefinition, caster: ArenaCharacter) -> void:
 func _cast_mend(spell: SpellDefinition, caster: ArenaCharacter) -> void:
 	var here := Vector2(caster.global_position.x, caster.global_position.z)
 	var dir := Vector2(caster.facing.x, caster.facing.z).normalized()
-	var h := arena.nearest_hole(here + dir * mend_probe, mend_reach)
+	var h := _hole_in_front(here, dir)
 	if not h.is_empty() and arena.close_hole(h.id):
 		_animating[h.id] = {"palette": spell.palette_index, "opening": false}
 		_rune(h.center, h.radius * 1.35, spell.palette_index)
@@ -150,6 +212,28 @@ func _cast_mend(spell: SpellDefinition, caster: ArenaCharacter) -> void:
 	resolved.emit(caster, spell, true, "")
 
 
+## The open hole closest to the caster inside Mend Earth's cone; {} if none.
+func _hole_in_front(here: Vector2, dir: Vector2) -> Dictionary:
+	var best := {}
+	var best_rim := INF
+	for h in arena.holes:
+		if h.target <= 0.0:
+			continue
+		var to: Vector2 = h.center - here
+		var dist := to.length()
+		var rim: float = maxf(dist - h.radius, 0.0)
+		if rim > mend_reach or rim >= best_rim:
+			continue
+		if dist > h.radius * 0.5:
+			# The cone widens by the part of the hole's disc seen from the caster.
+			var widen := rad_to_deg(asin(clampf(h.radius * 0.6 / dist, 0.0, 1.0)))
+			if rad_to_deg(absf(dir.angle_to(to))) > mend_cone + widen:
+				continue
+		best_rim = rim
+		best = h
+	return best
+
+
 ## The nearest mound whose footprint lies on the caster's line of sight, within reach.
 func _mound_in_front(here: Vector2, dir: Vector2) -> Dictionary:
 	var best := {}
@@ -165,23 +249,143 @@ func _mound_in_front(here: Vector2, dir: Vector2) -> Dictionary:
 	return best
 
 
-func _sound(key: String) -> void:
+## Hasten / Slow: slides the shared tempo by `amount` BPM over a bar.
+func _cast_tempo(spell: SpellDefinition, caster: ArenaCharacter, amount: float) -> void:
+	var clock := BeatClock.instance
+	var here := Vector2(caster.global_position.x, caster.global_position.z)
+	if not clock or not clock.running:
+		_fizzle_at(here, spell.palette_index)
+		resolved.emit(caster, spell, false, "no tempo")
+		return
+	var cur := clock.current_bpm()
+	var target := clampf(cur + amount, BeatClock.BPM_RANGE.x, BeatClock.BPM_RANGE.y)
+	if absf(target - cur) < 1.0:
+		_fizzle_at(here, spell.palette_index)
+		resolved.emit(caster, spell, false, "tempo limit")
+		return
+	clock.slide_to(target, tempo_slide_beats)
+	_rune(here, 1.6, spell.palette_index)
+	if fx:
+		# Notes flying off in a spiral (up = faster, down = slower).
+		for k in 12:
+			var a := TAU * k / 12.0
+			var v := Vector3(cos(a), 1.6 if amount > 0.0 else 0.4, sin(a)) * 2.2
+			fx.spawn(caster.global_position + Vector3.UP * 0.5, v, 0.6, FxSprites.TILE_STAR, spell.palette_index, 2, 5.0, 2.0, 0.0, 2.0)
+	_sound("raise", 1.25 if amount > 0.0 else 0.75)
+	resolved.emit(caster, spell, true, "")
+
+
+## Raise Minion: a small undead double of the caster climbs out of the ground in front and
+## shoves enemies softly, until it crumbles after `minion_beats` beats.
+func _cast_minion(spell: SpellDefinition, caster: ArenaCharacter) -> void:
+	var here := Vector2(caster.global_position.x, caster.global_position.z)
+	var dir := Vector2(caster.facing.x, caster.facing.z).normalized()
+	var spot := here
+	var found := false
+	for d in [1.2, 0.8, 1.7]:
+		spot = here + dir * d
+		if arena.ground_sdf(spot) < -0.45:
+			found = true
+			break
+	if not found:
+		_fizzle_at(here + dir * 1.2, spell.palette_index)
+		resolved.emit(caster, spell, false, "no ground")
+		return
+	var m := CHARACTER_SCENE.instantiate() as ArenaCharacter
+	m.name = "Minion"
+	m.display_name = "Minion"
+	m.model_scene = caster.model_scene
+	m.model_scale = caster.model_scale * minion_scale
+	m.color_index = caster.color_index
+	m.team = caster.team
+	m.opponent = caster.opponent
+	m.arena = arena
+	m.camera = camera
+	m.fx = fx
+	m.shade = 0.5
+	m.spawn_height = 0.9
+	m.auto_activate = true
+	m.move_speed = 3.6
+	m.push_strength = minion_push
+	m.push_range = 0.95
+	m.push_cooldown = 0.8
+	var col := m.get_node("Collision") as CollisionShape3D
+	var cap := CapsuleShape3D.new()
+	cap.radius = 0.2
+	cap.height = 0.6
+	col.shape = cap
+	col.position = Vector3(0.0, 0.3, 0.0)
+	add_child(m)
+	m.brain = AIBrain.new(arena, randi())
+	m.spawn(Vector3(spot.x, arena.height_at(spot), spot.y), caster.facing)
+	m.eliminated.connect(_minion_gone)
+	var clock := BeatClock.instance
+	_minions[m] = (clock.beats_now() if clock and clock.running else 0.0) + minion_beats
+	_rune(spot, 0.9, spell.palette_index)
+	if fx:
+		fx.dust_ring(Vector3(spot.x, arena.height_at(spot) + 0.05, spot.y), 8)
+		for k in 6:
+			var a := TAU * k / 6.0
+			fx.spawn(Vector3(spot.x, arena.height_at(spot) + 0.1, spot.y), Vector3(cos(a) * 0.5, 2.0, sin(a) * 0.5), 0.5,
+				FxSprites.TILE_SPARK, spell.palette_index, 2, 3.0, 1.0, 2.0, 1.0)
+	_sound("raise", 1.4)
+	resolved.emit(caster, spell, true, "")
+
+
+func _minion_gone(m: ArenaCharacter) -> void:
+	_minions.erase(m)
+	if fx:
+		fx.vanish(m.global_position + Vector3.UP * 0.2)
+	m.queue_free()
+
+
+## Shockwave: every enemy around the caster is blown away.
+func _cast_shockwave(spell: SpellDefinition, caster: ArenaCharacter) -> void:
+	var c := caster.global_position
+	for e in caster.enemies():
+		var d := e.global_position - c
+		d.y = 0.0
+		var dist := d.length()
+		if dist > shockwave_radius:
+			continue
+		var out := d / dist if dist > 0.05 else caster.facing
+		e.receive_push(out, shockwave_push * (1.0 - 0.45 * dist / shockwave_radius), caster)
+		e.velocity.y = 3.0
+		if fx:
+			fx.impact(e.global_position + Vector3.UP * 0.4, out)
+	caster.cast_pulse()
+	_rune(Vector2(c.x, c.z), shockwave_radius, spell.palette_index)
+	if fx:
+		fx.spawn(c + Vector3.UP * 0.4, Vector3.ZERO, 0.3, FxSprites.TILE_RING, spell.palette_index, 2, 12.0, 90.0)
+		fx.spawn(c + Vector3.UP * 0.4, Vector3.ZERO, 0.22, FxSprites.TILE_RING, 1, 2, 8.0, 60.0)
+		fx.dust_ring(c + Vector3.UP * 0.05, 16)
+		for k in 16:
+			var a := TAU * k / 16.0
+			fx.spawn(c + Vector3.UP * 0.3, Vector3(cos(a), 0.3, sin(a)) * 7.0, 0.35, FxSprites.TILE_SPARK, spell.palette_index, 2, 4.0, 1.0, 0.0, 4.0)
+	if camera:
+		camera.shake(0.3)
+	_sound("push", 0.7)
+	resolved.emit(caster, spell, true, "")
+
+
+func _sound(key: String, pitch := 1.0) -> void:
 	var pb := _sfx.get_stream_playback() as AudioStreamPlaybackPolyphonic
 	if pb:
-		pb.play_stream(SOUNDS[key], 0.0, sound_volume_db, randf_range(0.96, 1.04))
+		pb.play_stream(SOUNDS[key], 0.0, sound_volume_db, pitch * randf_range(0.96, 1.04))
 
 
 ## Rising ground shoves whoever stands on it outward (once per growth); the caster just
 ## rides it.
 func _physics_process(_delta: float) -> void:
+	_expire_minions()
 	if _rising.is_empty():
 		return
 	for m in arena.mounds:
 		if not _rising.has(m.id):
 			continue
 		var info: Dictionary = _rising[m.id]
-		for c in characters:
-			if c == info.caster or not c.is_alive() or c.state == ArenaCharacter.State.SPAWNING or info.pushed.has(c):
+		for c in (info.caster as ArenaCharacter).enemies():
+			if info.pushed.has(c):
 				continue
 			var d := Vector2(c.global_position.x, c.global_position.z) - (m.center as Vector2)
 			if d.length() > m.radius * 1.05 + ArenaCharacter.RADIUS:
@@ -194,6 +398,19 @@ func _physics_process(_delta: float) -> void:
 			info.pushed[c] = true
 			if fx:
 				fx.impact(c.global_position + Vector3.UP * 0.2, Vector3(out.x, 0.6, out.y))
+
+
+## Minions crumble to dust when their beats are up.
+func _expire_minions() -> void:
+	if _minions.is_empty():
+		return
+	var clock := BeatClock.instance
+	var now := clock.beats_now() if clock and clock.running else INF
+	for m in _minions.keys():
+		if not is_instance_valid(m):
+			_minions.erase(m)
+		elif now >= _minions[m] and m.is_alive():
+			_minion_gone(m)
 
 
 ## A short-lived glowing disc on the ground marking where the magic acts.

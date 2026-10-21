@@ -3,7 +3,8 @@ extends Resource
 ## One incantation: which buttons, in which rhythm, and what it does.
 ## Adding a spell = adding one of these to the SpellBook (no recognition code involved).
 
-enum Effect { PUSH, CREATE_HOLE, CLOSE_HOLE }
+enum Effect { PUSH, CREATE_HOLE, CLOSE_HOLE, TEMPO_UP, TEMPO_DOWN, RAISE_MINION, SHOCKWAVE,
+	SWAP_BALL, KNOCKOUT }
 
 ## Button glyphs and spoken syllables, by button index (Xbox layout).
 const BUTTONS: Array[String] = ["A", "B", "X", "Y"]
@@ -19,6 +20,10 @@ const SYLLABLES: Array[String] = ["Ah", "Bra", "Ca", "Da"]
 @export var effect := Effect.PUSH
 ## Palette color of the spell's magic.
 @export var palette_index := 15
+## In play. Disabled spells stay in the book as ready-to-test ideas.
+@export var enabled := true
+## What the spell does, for the book.
+@export_multiline var description := ""
 
 
 func to_pattern() -> RhythmPattern:

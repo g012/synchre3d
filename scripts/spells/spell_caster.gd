@@ -7,6 +7,9 @@ extends Node
 ## casting pose, metronome, UI signals) -> SpellEffects (what the spell does in the arena).
 ## Recognition runs on event timestamps only; `_process` just lets time-based rules
 ## (tempo lock/blank, incantation timeout) catch up and drives visuals.
+## Timestamps reach the engine through `BeatClock.warp`, so when a spell slides the shared
+## tempo the engine still sees the match tempo (it recognises in beats).
+## The CPU fighter has one too: its AIBrain presses syllables like a player would.
 
 signal judged(judgement: Dictionary)
 signal progress(spell: SpellDefinition, step: int, steps: int)
@@ -48,7 +51,6 @@ var _last_beat := -1
 
 func _ready() -> void:
 	engine = RhythmEngine.new(book.patterns())
-	engine.note_pressed.connect(func(b: int, t: float): pressed.emit(b, t))
 	engine.note_judged.connect(func(j: Dictionary): judged.emit(j))
 	engine.progress_changed.connect(_on_progress)
 	engine.incantation_failed.connect(_on_failed)
@@ -78,12 +80,28 @@ func syllable(button: int, time: float) -> void:
 	if voice:
 		_play_voice(SYLLABLE_SOUNDS[button], voice_volume_db, voice_pitch)
 	if listening:
-		engine.press(button, time)
+		pressed.emit(button, time)
+		engine.press(button, _warp(time))
 
 
 func syllable_released(button: int, time: float) -> void:
 	if listening:
-		engine.release(button, time)
+		engine.release(button, _warp(time))
+
+
+## Re-reads which spells of the book are enabled (drops any incantation in progress).
+func refresh_spells() -> void:
+	engine.patterns = book.patterns()
+	cancel()
+
+
+## The spell being chanted and how many syllables are done (null, 0 when idle).
+func chanting() -> SpellDefinition:
+	return engine.progress_pattern.payload as SpellDefinition if engine.progress_pattern else null
+
+
+static func _warp(t: float) -> float:
+	return BeatClock.instance.warp(t) if BeatClock.instance else t
 
 
 ## Locks this caster to the match tempo (see BeatClock).
@@ -102,7 +120,7 @@ func cancel() -> void:
 
 
 func _process(_delta: float) -> void:
-	var now := PlayerInput.now_seconds()
+	var now := _warp(PlayerInput.now_seconds())
 	engine.advance(now)
 	if engine.bpm > 0.0:
 		var beat := floori((now - engine.grid_origin) / engine.beat_duration())
@@ -115,7 +133,7 @@ func _process(_delta: float) -> void:
 
 
 func _on_tempo_locked(bpm: float, _time: float) -> void:
-	_last_beat = floori((PlayerInput.now_seconds() - engine.grid_origin) / engine.beat_duration())
+	_last_beat = floori((_warp(PlayerInput.now_seconds()) - engine.grid_origin) / engine.beat_duration())
 	_play(METRONOME_START)
 	tempo_changed.emit(bpm)
 

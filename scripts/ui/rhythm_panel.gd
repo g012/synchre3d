@@ -39,7 +39,7 @@ func setup(c: SpellCaster, player_title: String, pixel_font: Font, palette: Imag
 		_progress_step = step)
 	caster.fizzled.connect(_on_fizzled)
 	caster.cast.connect(_on_cast)
-	custom_minimum_size = Vector2(108 + 54 + SHEET_W + GLYPH + 4, 48)
+	custom_minimum_size = Vector2(108 + 54 + SHEET_W + GLYPH + 4, maxi(48, 6 + 15 * c.book.active().size()))
 	size = custom_minimum_size
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 
@@ -88,16 +88,18 @@ func _draw() -> void:
 		return
 	var now := PlayerInput.now_seconds()
 	var e := caster.engine
+	var clock := BeatClock.instance
 	var ink := Color(0.17, 0.13, 0.21, 0.72)
 	draw_rect(Rect2(Vector2.ZERO, size), ink)
 	draw_rect(Rect2(Vector2.ZERO, size), Color(1, 1, 1, 0.12), false, 1.0)
 
 	# --- tempo row
 	_text(Vector2(4, 9), title, Color.WHITE)
-	if e.bpm > 0.0:
-		_text(Vector2(18, 9), "%d BPM" % int(e.bpm), Color.WHITE)
-		var beat := floori((now - e.grid_origin) / e.beat_duration())
-		var phase := e.beat_phase(now)
+	if clock and clock.running:
+		_text(Vector2(18, 9), "%d BPM" % roundi(clock.current_bpm()), Color.WHITE)
+		var b := clock.beats_now()
+		var beat := floori(b)
+		var phase := b - beat
 		for k in 4:
 			var lit := posmod(beat, 4) == k
 			var c := PERFECT_COLOR if lit and phase < 0.35 else Color(1, 1, 1, 0.25 if not lit else 0.55)
@@ -140,7 +142,7 @@ func _draw() -> void:
 
 	# --- spell sheets: each spell's notes on a 4-beat timeline
 	var sx := 108.0
-	var spells := caster.book.spells
+	var spells := caster.book.active()
 	for r in spells.size():
 		var s: SpellDefinition = spells[r]
 		var y := 3 + r * 15
