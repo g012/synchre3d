@@ -37,7 +37,8 @@ almost finished still lands. Behind the scenes the `BeatClock` keeps a tempo map
 rhythm engine stays locked to the match tempo but receives *warped* timestamps (the time
 stretched so that beats of the current tempo fall where beats of the match tempo would).
 Recognition is therefore done in beats: a player who follows the metronome through the slide
-is judged exactly as at a steady tempo. Each new round starts back at the match tempo.
+is judged exactly as at a steady tempo. The new tempo carries over to the following rounds; only a new game
+(1P/2P switch) asks for a tempo again.
 
 ## Tuning
 

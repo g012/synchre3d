@@ -6,7 +6,7 @@ extends Node
 ## Tempo: before the first round player 1 taps four even beats (the original Synchre
 ## count-in rule, clamped to 80-160 BPM); the match starts as soon as they lock. That tempo
 ## drives the shared BeatClock (metronome, dancing flowers) and every caster's rhythm engine
-## for the whole match (tempo spells slide it; each round starts back at the match tempo).
+## for the whole match (tempo spells slide it, and the new tempo carries over to the next rounds).
 ##
 ## Human players move/jump/shove through a PlayerBrain and cast rhythmic incantations:
 ## PlayerInput (timestamped A/B/X/Y) -> SpellCaster (rhythm engine) -> SpellEffects.
@@ -222,9 +222,8 @@ func start_round() -> void:
 	phase_time = 0.0
 	_landed = 0
 	_round_decided = false
-	beat_clock.reset_tempo()
 	_reset_arena_and_spawn()
-	hud.show_message("READY?", hud.palette_color(1, 3), "%d BPM" % roundi(beat_clock.bpm))
+	hud.show_message("READY?", hud.palette_color(1, 3), "%d BPM" % roundi(beat_clock.current_bpm()))
 
 
 func _on_landed(_c: ArenaCharacter) -> void:
@@ -324,5 +323,5 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _mcp_state() -> Dictionary:
 	return {"phase": Phase.keys()[phase], "scores": scores, "two_player": two_player,
-		"bpm": beat_clock.bpm if beat_clock else 0.0,
+		"bpm": beat_clock.current_bpm() if beat_clock else 0.0,
 		"decided": _round_decided, "message": hud._message.text if hud._message.visible else ""}

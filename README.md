@@ -60,8 +60,8 @@ console). The camera follows both fighters and zooms out a little when they are 
    the wait after them within ±20%). The tempo is clamped to **80–160 BPM**, and the match
    starts the moment it locks. That tempo is shared by both players, the CPU and everything
    that moves to the music (metronome, dancing flowers) for the whole match; switching 1P/2P
-   starts a new game and asks again. (Tempo spells from the book can slide it; each round
-   starts back at the match tempo.)
+   starts a new game and asks again. (Tempo spells from the book can slide it; the new
+   tempo carries over to the following rounds.)
 2. **Chant.** Each spell is one measure (4 beats) of syllables in a set rhythm:
 
    | Spell | Buttons | Rhythm (beats before each note) | Effect |

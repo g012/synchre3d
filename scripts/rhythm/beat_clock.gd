@@ -89,13 +89,6 @@ func slide_to(target: float, beats := 4.0, t := -1.0) -> float:
 	return target
 
 
-## Back to the match tempo at once (new round: no chant is in progress).
-func reset_tempo() -> void:
-	if running:
-		_add_segment(PlayerInput.now_seconds(), bpm, bpm, 0.0)
-		tempo_changed.emit(bpm)
-
-
 func _add_segment(t: float, from: float, to: float, dur: float) -> void:
 	var b := beats_at(t)
 	# Segments only ever start at the present, so later ones can't exist; keep a short history
