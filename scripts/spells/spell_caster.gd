@@ -15,7 +15,8 @@ signal judged(judgement: Dictionary)
 ## `spell` leads; `candidates()` lists every spell the syllables so far could still become.
 signal progress(spell: SpellDefinition, step: int, steps: int)
 signal fizzled(spell: SpellDefinition, step: int, reason: String)
-signal cast(spell: SpellDefinition)
+## A spell completed at `level`; `precision` 0..1 = how well the chant sat on the beat.
+signal cast(spell: SpellDefinition, level: int, precision: float)
 signal tempo_changed(bpm: float)
 signal pressed(button: int, time: float)
 
@@ -28,6 +29,12 @@ const SYLLABLE_SOUNDS: Array[AudioStream] = [
 const FIZZLE_SOUND := preload("res://assets/audio/fizzle.wav")
 
 @export var book: SpellBook
+## Per-note timing tolerance, as a fraction of the note (the original Synchre's is 0.2).
+## Wide, to forgive mistakes; precision then scales the spell's power instead
+## (see `power_range`).
+@export var timing_tolerance := 0.4
+## Power multiplier of a cast at precision 0 and 1.
+@export var power_range := Vector2(0.55, 1.0)
 ## Metronome clicks once the tempo is locked (the original's behavior).
 @export var metronome := true
 @export var metronome_pitch := 1.0
@@ -55,6 +62,7 @@ var _press_real := 0.0
 
 func _ready() -> void:
 	engine = RhythmEngine.new(book.patterns())
+	engine.tolerance = timing_tolerance
 	engine.note_judged.connect(_on_judged)
 	engine.progress_changed.connect(_on_progress)
 	engine.incantation_failed.connect(_on_failed)
@@ -76,6 +84,11 @@ func _ready() -> void:
 	orb.character = character
 	orb.fx = fx
 	add_child(orb)
+	if effects:
+		var ring := CastRing.new()
+		ring.caster = self
+		ring.arena = effects.arena
+		add_child(ring)
 
 
 ## One syllable, at `time` seconds (PlayerInput clock). Safe to call at any time: moving,
@@ -106,12 +119,25 @@ func chanting() -> SpellDefinition:
 	return engine.progress_pattern.payload as SpellDefinition if engine.progress_pattern else null
 
 
-## Every spell the incantation in progress could still become (empty when idle).
+## Every spell the incantation in progress could still become, at any level (empty when
+## idle).
 func candidates() -> Array[SpellDefinition]:
 	var out: Array[SpellDefinition] = []
 	for p in engine.candidate_patterns():
-		out.append(p.payload as SpellDefinition)
+		if not p.payload in out:
+			out.append(p.payload as SpellDefinition)
 	return out
+
+
+## Buttons validated so far in the incantation in progress.
+func chanted() -> PackedInt32Array:
+	var p := engine.progress_pattern
+	return p.syllables.slice(0, engine.progress_step) if p else PackedInt32Array()
+
+
+## Notes of the leading candidate chant (0 when idle).
+func chant_length() -> int:
+	return engine.progress_pattern.size() if engine.progress_pattern else 0
 
 
 static func _warp(t: float) -> float:
@@ -185,11 +211,13 @@ func _on_failed(pattern: RhythmPattern, step: int, reason: String, _time: float)
 
 func _on_matched(pattern: RhythmPattern, _time: float) -> void:
 	var spell := pattern.payload as SpellDefinition
+	var precision := engine.last_precision
 	character.cast_level = 0.0
 	orb.release(spell.palette_index)
-	cast.emit(spell)
+	cast.emit(spell, pattern.level, precision)
 	if effects:
-		effects.cast(spell, character, character.hand_anchor())
+		effects.cast(spell, character, character.hand_anchor(), pattern.level,
+			lerpf(power_range.x, power_range.y, precision))
 
 
 func _play(stream: AudioStream) -> void:

@@ -15,6 +15,7 @@ signal eliminated(character: ArenaCharacter)
 signal landed(character: ArenaCharacter)
 signal jumped(character: ArenaCharacter)
 signal dashed(character: ArenaCharacter)
+signal auto_aim_changed(character: ArenaCharacter, on: bool)
 
 enum State { SPAWNING, ACTIVE, PUSHING, HITSTUN, FALLING, OUT, VICTORY, FROZEN }
 
@@ -115,6 +116,11 @@ var _air_dash_used := false
 ## Seconds left knocked out: no control, still pushable.
 var _ko := 0.0
 var _ko_fx := 0.0
+## Aimed spells turn the caster toward the nearest enemy (toggled with LT).
+var auto_aim := true:
+	set(value):
+		auto_aim = value
+		auto_aim_changed.emit(self, value)
 ## Incantation visuals, driven by the SpellCaster: 0 = idle, 1 = last syllable reached.
 var cast_level := 0.0
 var _cast_pose := 0.0
@@ -332,6 +338,15 @@ func _update_move(delta: float, control: float) -> void:
 	velocity.z = cur.y
 	if wish.length_squared() > 0.01:
 		_turn_towards(wish, delta)
+
+
+## Turns at once to face `dir` (on the ground plane).
+func face(dir: Vector3) -> void:
+	dir.y = 0.0
+	if dir.length_squared() < 0.0001:
+		return
+	_facing_angle = atan2(dir.x, dir.z)
+	facing = Vector3(sin(_facing_angle), 0.0, cos(_facing_angle))
 
 
 func _turn_towards(dir: Vector3, delta: float) -> void:

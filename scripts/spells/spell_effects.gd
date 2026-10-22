@@ -60,6 +60,11 @@ var _rising := {}
 # Summoned minions: minion -> beat (BeatClock) at which it crumbles.
 var _minions := {}
 var _sfx: AudioStreamPlayer
+# The cast being resolved: its level (1..3) and power (precision multiplier, ~0.55..1).
+var _level := 2
+var _power := 1.0
+# Where the caster faced before auto-aim turned them (Mend Earth closes holes there).
+var _own_facing := Vector3.FORWARD
 
 
 func setup(arena_node: Arena, fx_node: FxSprites, cam: PixelCamera, all_characters: Array[ArenaCharacter]) -> void:
@@ -78,10 +83,22 @@ func setup(arena_node: Arena, fx_node: FxSprites, cam: PixelCamera, all_characte
 	_sfx.play()
 
 
-func cast(spell: SpellDefinition, caster: ArenaCharacter, origin: Vector3) -> void:
+## Resolves `spell` cast by `caster` at `level` (1 = start + end only, 2, 3 = longer chants)
+## with `power` (from the chant's precision: 1 = dead on the beat).
+func cast(spell: SpellDefinition, caster: ArenaCharacter, origin: Vector3, level := 2, power := 1.0) -> void:
 	if not caster.is_alive():
 		resolved.emit(caster, spell, false, "fallen")
 		return
+	_level = clampi(level, 1, 3)
+	_power = power
+	_own_facing = caster.facing
+	if caster.auto_aim and spell.effect in AIMED:
+		var target := _aim_target(caster)
+		if target:
+			var to := target.global_position - caster.global_position
+			to.y = 0.0
+			caster.face(to)
+			origin = caster.hand_anchor()
 	match spell.effect:
 		SpellDefinition.Effect.PUSH:
 			_cast_bolt(spell, caster, origin, MagicBolt.Kind.PUSH)
@@ -90,9 +107,9 @@ func cast(spell: SpellDefinition, caster: ArenaCharacter, origin: Vector3) -> vo
 		SpellDefinition.Effect.CLOSE_HOLE:
 			_cast_mend(spell, caster)
 		SpellDefinition.Effect.TEMPO_UP:
-			_cast_tempo(spell, caster, tempo_step)
+			_cast_tempo(spell, caster, roundf(tempo_step * _lv(0.5, 1.0, 1.5) * _power))
 		SpellDefinition.Effect.TEMPO_DOWN:
-			_cast_tempo(spell, caster, -tempo_step)
+			_cast_tempo(spell, caster, -roundf(tempo_step * _lv(0.5, 1.0, 1.5) * _power))
 		SpellDefinition.Effect.RAISE_MINION:
 			_cast_minion(spell, caster)
 		SpellDefinition.Effect.SHOCKWAVE:
@@ -101,6 +118,34 @@ func cast(spell: SpellDefinition, caster: ArenaCharacter, origin: Vector3) -> vo
 			_cast_bolt(spell, caster, origin, MagicBolt.Kind.SWAP)
 		SpellDefinition.Effect.KNOCKOUT:
 			_cast_bolt(spell, caster, origin, MagicBolt.Kind.KNOCKOUT)
+
+
+const AIMED: Array[SpellDefinition.Effect] = [SpellDefinition.Effect.PUSH,
+	SpellDefinition.Effect.CREATE_HOLE, SpellDefinition.Effect.CLOSE_HOLE,
+	SpellDefinition.Effect.RAISE_MINION, SpellDefinition.Effect.SWAP_BALL,
+	SpellDefinition.Effect.KNOCKOUT]
+## Auto-aim only locks onto enemies this close.
+const AIM_RANGE := 14.0
+
+
+## The value for the current level (1, 2, 3).
+func _lv(l1: float, l2: float, l3: float) -> float:
+	return [l1, l2, l3][_level - 1]
+
+
+## Auto-aim target: the opponent if in range, else the nearest enemy (minions included).
+func _aim_target(caster: ArenaCharacter) -> ArenaCharacter:
+	var o := caster.opponent
+	if o and o.is_alive() and o.global_position.distance_to(caster.global_position) < AIM_RANGE:
+		return o
+	var best: ArenaCharacter = null
+	var best_d := AIM_RANGE
+	for e in caster.enemies():
+		var d := e.global_position.distance_to(caster.global_position)
+		if d < best_d:
+			best_d = d
+			best = e
+	return best
 
 
 ## Removes in-flight spells (new round).
@@ -124,17 +169,22 @@ func _cast_bolt(spell: SpellDefinition, caster: ArenaCharacter, origin: Vector3,
 	bolt.direction = caster.facing.normalized()
 	bolt.palette_index = spell.palette_index
 	match kind:
+		MagicBolt.Kind.PUSH:
+			bolt.radius = _lv(0.26, 0.36, 0.46)
+			bolt.speed = _lv(14.0, 16.0, 18.0)
+			bolt.hit_radius = _lv(0.65, 0.8, 0.95)
+			bolt.strength = _lv(10.0, 15.0, 19.0) * _power
 		MagicBolt.Kind.SWAP:
 			bolt.radius = 0.13
 			bolt.speed = 24.0
 			bolt.hit_radius = 0.55
-			bolt.max_range = 10.0
+			bolt.max_range = _lv(6.0, 10.0, 14.0) * lerpf(0.8, 1.0, _power)
 		MagicBolt.Kind.KNOCKOUT:
 			bolt.radius = 0.24
 			bolt.speed = 13.0
 			bolt.hit_radius = 0.7
 			bolt.max_range = 8.0
-			bolt.stun_time = knockout_beats * _beat_seconds()
+			bolt.stun_time = knockout_beats * _lv(0.5, 1.0, 1.5) * _power * _beat_seconds()
 	add_child(bolt)
 	bolt.global_position = origin
 	# Recoil sells the release.
@@ -158,6 +208,8 @@ func _cast_open_pit(spell: SpellDefinition, caster: ArenaCharacter) -> void:
 	var dir := Vector2(caster.facing.x, caster.facing.z).normalized()
 	var mound := _mound_in_front(here, dir)
 	if not mound.is_empty() and not arena.lower_mound(mound).has("error"):
+		if _level >= 3:
+			arena.lower_mound(mound) # level 3 digs two steps at once
 		_rune(mound.center, mound.radius * 1.05, spell.palette_index)
 		if fx:
 			fx.dust_ring(Vector3(mound.center.x, arena.height_at(mound.center) + 0.05, mound.center.y), 8 + 3 * mound.level)
@@ -166,12 +218,13 @@ func _cast_open_pit(spell: SpellDefinition, caster: ArenaCharacter) -> void:
 		_sound("pit", 0.85)
 		resolved.emit(caster, spell, true, "")
 		return
+	var radius := pit_radius * _lv(0.7, 1.0, 1.3) * lerpf(0.8, 1.0, _power)
 	for d in pit_distances:
 		var c := here + dir * d
-		var id := arena.open_hole(c, pit_radius)
+		var id := arena.open_hole(c, radius)
 		if id >= 0:
 			_animating[id] = {"palette": spell.palette_index, "opening": true}
-			_rune(c, pit_radius * 1.35, spell.palette_index)
+			_rune(c, radius * 1.35, spell.palette_index)
 			if fx:
 				fx.dust_ring(Vector3(c.x, 0.05, c.y), 10)
 			if camera:
@@ -186,7 +239,8 @@ func _cast_open_pit(spell: SpellDefinition, caster: ArenaCharacter) -> void:
 func _cast_mend(spell: SpellDefinition, caster: ArenaCharacter) -> void:
 	var here := Vector2(caster.global_position.x, caster.global_position.z)
 	var dir := Vector2(caster.facing.x, caster.facing.z).normalized()
-	var h := _hole_in_front(here, dir)
+	# Holes are closed where the caster was facing (auto-aim only steers the raised ground).
+	var h := _hole_in_front(here, Vector2(_own_facing.x, _own_facing.z).normalized())
 	if not h.is_empty() and arena.close_hole(h.id):
 		_animating[h.id] = {"palette": spell.palette_index, "opening": false}
 		_rune(h.center, h.radius * 1.35, spell.palette_index)
@@ -197,12 +251,15 @@ func _cast_mend(spell: SpellDefinition, caster: ArenaCharacter) -> void:
 	var target := _mound_in_front(here, dir)
 	var spot := here + dir * raise_distance
 	var res := arena.grow_mound(target) if not target.is_empty() else arena.raise_ground(spot)
+	if _level >= 3 and not res.has("error"):
+		arena.grow_mound(res.mound) # level 3 raises two steps at once
 	if res.has("error"):
 		_fizzle_at(spot, spell.palette_index)
 		resolved.emit(caster, spell, false, res.error)
 		return
 	var m: Dictionary = res.mound
-	_rising[m.id] = {"caster": caster, "palette": spell.palette_index, "pushed": {}}
+	_rising[m.id] = {"caster": caster, "palette": spell.palette_index, "pushed": {},
+		"force": _lv(0.8, 1.0, 1.2) * _power}
 	_rune(m.center, m.to.x * 1.05, spell.palette_index)
 	if fx:
 		fx.dust_ring(Vector3(m.center.x, arena.height_at(m.center) + 0.05, m.center.y), 8 + 4 * m.level)
@@ -306,7 +363,7 @@ func _cast_minion(spell: SpellDefinition, caster: ArenaCharacter) -> void:
 	m.spawn_height = 0.9
 	m.auto_activate = true
 	m.move_speed = 3.6
-	m.push_strength = minion_push
+	m.push_strength = minion_push * _lv(0.8, 1.0, 1.2)
 	m.push_range = 0.95
 	m.push_cooldown = 0.8
 	var col := m.get_node("Collision") as CollisionShape3D
@@ -320,7 +377,7 @@ func _cast_minion(spell: SpellDefinition, caster: ArenaCharacter) -> void:
 	m.spawn(Vector3(spot.x, arena.height_at(spot), spot.y), caster.facing)
 	m.eliminated.connect(_minion_gone)
 	var clock := BeatClock.instance
-	_minions[m] = (clock.beats_now() if clock and clock.running else 0.0) + minion_beats
+	_minions[m] = (clock.beats_now() if clock and clock.running else 0.0) + minion_beats * _lv(0.5, 1.0, 1.5) * _power
 	_rune(spot, 0.9, spell.palette_index)
 	if fx:
 		fx.dust_ring(Vector3(spot.x, arena.height_at(spot) + 0.05, spot.y), 8)
@@ -342,22 +399,24 @@ func _minion_gone(m: ArenaCharacter) -> void:
 ## Shockwave: every enemy around the caster is blown away.
 func _cast_shockwave(spell: SpellDefinition, caster: ArenaCharacter) -> void:
 	var c := caster.global_position
+	var radius := shockwave_radius * _lv(0.7, 1.0, 1.3)
+	var force := shockwave_push * _lv(0.8, 1.0, 1.2) * _power
 	for e in caster.enemies():
 		var d := e.global_position - c
 		d.y = 0.0
 		var dist := d.length()
-		if dist > shockwave_radius:
+		if dist > radius:
 			continue
 		var out := d / dist if dist > 0.05 else caster.facing
-		e.receive_push(out, shockwave_push * (1.0 - 0.45 * dist / shockwave_radius), caster)
+		e.receive_push(out, force * (1.0 - 0.45 * dist / radius), caster)
 		e.velocity.y = 3.0
 		if fx:
 			fx.impact(e.global_position + Vector3.UP * 0.4, out)
 	caster.cast_pulse()
-	_rune(Vector2(c.x, c.z), shockwave_radius, spell.palette_index)
+	_rune(Vector2(c.x, c.z), radius, spell.palette_index)
 	if fx:
-		fx.spawn(c + Vector3.UP * 0.4, Vector3.ZERO, 0.3, FxSprites.TILE_RING, spell.palette_index, 2, 12.0, 90.0)
-		fx.spawn(c + Vector3.UP * 0.4, Vector3.ZERO, 0.22, FxSprites.TILE_RING, 1, 2, 8.0, 60.0)
+		fx.spawn(c + Vector3.UP * 0.4, Vector3.ZERO, 0.3, FxSprites.TILE_RING, spell.palette_index, 2, 12.0, 90.0 * radius / shockwave_radius)
+		fx.spawn(c + Vector3.UP * 0.4, Vector3.ZERO, 0.22, FxSprites.TILE_RING, 1, 2, 8.0, 60.0 * radius / shockwave_radius)
 		fx.dust_ring(c + Vector3.UP * 0.05, 16)
 		for k in 16:
 			var a := TAU * k / 16.0
@@ -392,7 +451,7 @@ func _physics_process(_delta: float) -> void:
 				continue
 			var out := d.normalized() if d.length() > 0.05 else Vector2(info.caster.facing.x, info.caster.facing.z)
 			var level: int = clampi(m.level, 1, raise_push.size())
-			c.receive_push(Vector3(out.x, 0.0, out.y), raise_push[level - 1], info.caster)
+			c.receive_push(Vector3(out.x, 0.0, out.y), raise_push[level - 1] * info.force, info.caster)
 			# Launched upward too: the ground heaves under them.
 			c.velocity.y = 2.5 + 1.5 * level
 			info.pushed[c] = true

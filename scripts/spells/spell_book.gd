@@ -15,10 +15,21 @@ func active() -> Array[SpellDefinition]:
 	return out
 
 
+## Lowest level `spell` can be chanted at: 1 for the first enabled spell of its family
+## (start + end alone), else 2.
+func min_level(spell: SpellDefinition) -> int:
+	for s in active():
+		if s.family == spell.family:
+			return 1 if s == spell else 2
+	return 2
+
+
+## Every chant in play: each enabled spell at each of its levels.
 func patterns() -> Array[RhythmPattern]:
 	var out: Array[RhythmPattern] = []
 	for s in active():
-		out.append(s.to_pattern())
+		for level in range(min_level(s), s.max_level + 1):
+			out.append(s.to_pattern(level))
 	return out
 
 

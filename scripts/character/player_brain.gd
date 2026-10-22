@@ -16,7 +16,9 @@ func _init(player_input: PlayerInput) -> void:
 	input = player_input
 
 
-func update(_character: ArenaCharacter, delta: float) -> void:
+func update(character: ArenaCharacter, delta: float) -> void:
+	if input.aim_toggle_just_pressed():
+		character.auto_aim = not character.auto_aim
 	_jump_buffer = maxf(_jump_buffer - delta, 0.0)
 	_push_buffer = maxf(_push_buffer - delta, 0.0)
 	_dash_buffer = maxf(_dash_buffer - delta, 0.0)

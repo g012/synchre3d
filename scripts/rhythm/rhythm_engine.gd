@@ -63,6 +63,13 @@ var blank_beats := BLANK_DURATION * 2
 var tempo_from_openings := true
 ## A tempo set from outside (`set_fixed_tempo`): never blanked, never re-detected.
 var fixed_tempo := false
+## Timing tolerance of each note, as a fraction of its own duration (the original's 0.2;
+## the arena game widens it and rewards precision instead, see `last_precision`).
+## The count-in rule always uses the original TOLERANCE.
+var tolerance := TOLERANCE
+## Precision of the last matched pattern: 1 = every note dead on the beat grid that fits
+## them best, 0 = every note at the edge of its tolerance.
+var last_precision := 1.0
 var bpm := 0.0
 var bpm_r := DEFAULT_BPM_R
 var has_blanked := true
@@ -299,7 +306,7 @@ func _set_bpm(value: float) -> void:
 ## Indices of the newest unconsumed taps that are young enough for `pattern` (oldest first),
 ## like the original's event_indices: stop at a consumed tap or past the capture window.
 func _recent(pattern: RhythmPattern, time: float) -> Array[int]:
-	var capture := pattern.length() * beat_duration() * (1.0 + TOLERANCE)
+	var capture := pattern.length() * beat_duration() * (1.0 + tolerance)
 	var out: Array[int] = []
 	for i in range(notes.size() - 1, -1, -1):
 		if notes[i].consumed or time - notes[i].t > capture:
@@ -323,7 +330,7 @@ func _fit(pattern: RhythmPattern, idx: Array[int], count: int, final: bool) -> A
 		if not pattern.syllables.is_empty() and note.instr != pattern.syllables[k]:
 			return []
 		var on := pattern.onset(k) * bd
-		var tol := TOLERANCE * pattern.beats[k] * bd
+		var tol := tolerance * pattern.beats[k] * bd
 		lo = maxf(lo, note.t - on - tol)
 		hi = minf(hi, note.t - on + tol)
 	if final:
@@ -333,18 +340,54 @@ func _fit(pattern: RhythmPattern, idx: Array[int], count: int, final: bool) -> A
 	return [lo, hi]
 
 
+## Longest patterns are tried first, so a chant whose ending happens to spell a shorter
+## pattern still casts as the long one.
 func _match_patterns(time: float) -> RhythmPattern:
-	for pattern in patterns:
+	for pattern in _by_length():
 		var idx := _recent(pattern, time)
 		if idx.size() < maxi(2, pattern.size()):
 			continue
-		if _fit(pattern, idx, pattern.size(), true).is_empty():
+		var fit := _fit(pattern, idx, pattern.size(), true)
+		if fit.is_empty():
 			continue
 		var first := idx.size() - pattern.size()
+		last_precision = _precision(pattern, idx.slice(first), fit)
 		for k in range(first, idx.size()):
 			notes[idx[k]].consumed = true
 		return pattern
 	return null
+
+
+var _sorted: Array[RhythmPattern] = []
+var _sorted_from: Array[RhythmPattern] = []
+
+
+func _by_length() -> Array[RhythmPattern]:
+	if _sorted_from != patterns or _sorted.size() != patterns.size():
+		_sorted_from = patterns.duplicate()
+		_sorted = patterns.duplicate()
+		# Stable: equal lengths keep their order.
+		var order := {}
+		for i in _sorted.size():
+			order[_sorted[i]] = i
+		_sorted.sort_custom(func(a: RhythmPattern, b: RhythmPattern) -> bool:
+			return a.size() > b.size() or (a.size() == b.size() and order[a] < order[b]))
+	return _sorted
+
+
+## 1 - mean(|offset| / tolerance) of the notes `idx` against the beat grid that fits them
+## best (least squares, kept inside the feasible window [lo, hi]).
+func _precision(pattern: RhythmPattern, idx: Array[int], fit: Array[float]) -> float:
+	var bd := beat_duration()
+	var m := 0.0
+	for k in idx.size():
+		m += notes[idx[k]].t - pattern.onset(k) * bd
+	m = clampf(m / idx.size(), fit[0], fit[1])
+	var err := 0.0
+	for k in idx.size():
+		var off: float = notes[idx[k]].t - (m + pattern.onset(k) * bd)
+		err += absf(off) / (tolerance * pattern.beats[k] * bd)
+	return clampf(1.0 - err / idx.size(), 0.0, 1.0)
 
 
 # ------------------------------------------------------------------------------ progress
@@ -396,7 +439,7 @@ func _track_progress(time: float, matched: RhythmPattern) -> void:
 			for pattern in patterns:
 				if not pattern.syllables.is_empty() and pattern.syllables[0] == note.instr:
 					var on := time - pattern.onset(0) * bd
-					var tol := TOLERANCE * pattern.beats[0] * bd
+					var tol := tolerance * pattern.beats[0] * bd
 					found.append({"pattern": pattern, "lo": on - tol, "hi": on + tol})
 					best_k = 1
 	if best_k == 0:
@@ -445,7 +488,7 @@ func _judge(pattern: RhythmPattern, step: int, time: float, note: Dictionary) ->
 		return j
 	var bd := beat_duration()
 	var expected := (prev[0] + prev[1]) * 0.5 + pattern.onset(step - 1) * bd
-	var tol := TOLERANCE * pattern.beats[step - 1] * bd
+	var tol := tolerance * pattern.beats[step - 1] * bd
 	j.offset = time - expected
 	j.tolerance = tol
 	if absf(j.offset) <= PERFECT_FRACTION * tol:
@@ -470,7 +513,7 @@ func _break_reason(note: Dictionary, time: float) -> Dictionary:
 	var p: RhythmPattern = c.pattern
 	var bd := beat_duration()
 	var expected: float = (c.lo + c.hi) * 0.5 + p.onset(progress_step) * bd
-	var tol := TOLERANCE * p.beats[progress_step] * bd
+	var tol := tolerance * p.beats[progress_step] * bd
 	var offset := time - expected
 	if wrong:
 		return {"text": "wrong syllable", "offset": offset, "tolerance": tol}
@@ -482,7 +525,7 @@ func _deadline(c: Dictionary) -> float:
 	var p: RhythmPattern = c.pattern
 	var bd := beat_duration()
 	var s := progress_step
-	var late_tol := TOLERANCE * p.beats[s] * bd if s < p.size() - 1 else 0.0
+	var late_tol := tolerance * p.beats[s] * bd if s < p.size() - 1 else 0.0
 	return c.hi + p.onset(s) * bd + late_tol
 
 

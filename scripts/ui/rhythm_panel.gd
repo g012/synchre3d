@@ -2,9 +2,11 @@ class_name RhythmPanel
 extends Control
 ## Small rhythm/incantation readout for one caster, drawn on the low-res pixel grid.
 ##
-##   [tempo + beat lights]          | PUSH       A . B X . Y . A   <- spell sheets: notes on a
-##   [last syllables + timing ticks]| OPEN PIT   . X Y . . X Y        4-beat timeline, lit as
-##   [result: PUSH! / FIZZLE: LATE] | MEND       B . Y . B Y A        they are played
+##   [tempo + beat lights]          | PUSH       A A B X . Y   <- spell sheets: each spell's
+##   [last syllables + timing ticks]| SHOCKWAVE  A A . X . X . Y  level-2 chant on a beat
+##   [result: PUSH LV2 87%]         | ---------                   timeline, grouped by family
+##                                  | OPEN PIT   X Y Y Y . X      (shared start and end dimmed),
+##                                                                  lit as they are played
 ##
 ## Timing tick under each syllable: centred = on time, shifted left = early, right = late
 ## (proportional to the error / tolerance), red cross = outside tolerance.
@@ -12,9 +14,15 @@ extends Control
 const TRAIL := 8
 const GLYPH := 9
 const SHEET_W := 72
+## Sheet scale: pixels per beat.
+const BEAT_PX := 18.0
+const ROW := 11
+const NAME_W := 64
 const PERFECT_COLOR := Color("f6d65a")
 
 var caster: SpellCaster
+## Spell sheets on the right (off for the CPU: its ring shows what it chants).
+var show_sheets := true
 var title := "P1"
 var font: Font
 
@@ -41,7 +49,8 @@ func setup(c: SpellCaster, player_title: String, pixel_font: Font, palette: Imag
 		_candidates = caster.candidates())
 	caster.fizzled.connect(_on_fizzled)
 	caster.cast.connect(_on_cast)
-	custom_minimum_size = Vector2(108 + 54 + SHEET_W + GLYPH + 4, maxi(48, 6 + 15 * c.book.active().size()))
+	var w := 108 + NAME_W + SHEET_W + GLYPH + 4 if show_sheets else 108
+	custom_minimum_size = Vector2(w, maxi(48, 5 + ROW * c.book.active().size()) if show_sheets else 48)
 	size = custom_minimum_size
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 
@@ -73,12 +82,12 @@ func _on_fizzled(spell: SpellDefinition, _step: int, reason: String) -> void:
 	_result_time = PlayerInput.now_seconds()
 
 
-func _on_cast(spell: SpellDefinition) -> void:
-	_result = "%s!" % spell.display_name.to_upper()
+func _on_cast(spell: SpellDefinition, level: int, precision: float) -> void:
+	_result = "%s LV%d %d%%" % [spell.display_name.to_upper(), level, roundi(precision * 100.0)]
 	_result_color = _palette.get_pixel(spell.palette_index, 3)
 	_result_time = PlayerInput.now_seconds()
 	_progress_spell = spell
-	_progress_step = spell.syllables.size()
+	_progress_step = 99
 	_candidates.clear()
 
 
@@ -113,6 +122,12 @@ func _draw() -> void:
 		for k in 4:
 			draw_rect(Rect2(84 + k * 5, 4, 3, 3), PERFECT_COLOR if k < n else Color(1, 1, 1, 0.2))
 
+	# Auto-aim (LT) on/off.
+	if caster.character.auto_aim:
+		_text(Vector2(4, 35), "AUTO-AIM", PERFECT_COLOR)
+	else:
+		_text(Vector2(4, 35), "AIM OFF", Color(1, 1, 1, 0.35))
+
 	# --- syllable trail with timing ticks
 	for i in _trail.size():
 		var entry: Dictionary = _trail[i]
@@ -136,33 +151,43 @@ func _draw() -> void:
 	# --- result / status line
 	if now - _result_time < 1.6:
 		_text(Vector2(4, 44), _result, _result_color)
-	elif _progress_spell and _progress_step > 0 and _progress_step < _progress_spell.syllables.size():
-		_text(Vector2(4, 44), _progress_spell.incantation().to_upper().substr(0, 26), Color(1, 1, 1, 0.75))
+	elif e.progress_pattern:
+		var lead := e.progress_pattern.payload as SpellDefinition
+		_text(Vector2(4, 44), lead.incantation(e.progress_pattern.level).to_upper().substr(0, 17), Color(1, 1, 1, 0.75))
 	elif e.bpm > 0.0:
 		_text(Vector2(4, 44), "CHANT ON THE BEAT", Color(1, 1, 1, 0.45))
 	else:
 		_text(Vector2(4, 44), "OR START A SPELL", Color(1, 1, 1, 0.45))
 
-	# --- spell sheets: each spell's notes on a 4-beat timeline
+	# --- spell sheets: each spell's level-2 chant on a beat timeline, grouped by family
+	if not show_sheets:
+		return
 	var sx := 108.0
 	var spells := caster.book.active()
+	var family: SpellFamily = null
 	for r in spells.size():
 		var s: SpellDefinition = spells[r]
-		var y := 3 + r * 15
+		var y := 2 + r * ROW
+		if family and s.family != family:
+			draw_rect(Rect2(sx, y - 1, NAME_W + SHEET_W + 4, 1), Color(1, 1, 1, 0.18))
+		family = s.family
 		# Every spell the chant could still become is lit (they share their opening).
 		var active := _progress_step > 0 and (_progress_spell == s or s in _candidates)
 		var name_c := _palette.get_pixel(s.palette_index, 3) if active else Color(1, 1, 1, 0.6)
 		_text(Vector2(sx, y + 8), s.display_name.to_upper(), name_c)
-		var tx := sx + 54.0
-		# beat ticks
-		for k in 5:
-			draw_rect(Rect2(tx + k * SHEET_W / 4.0, y + 9, 1, 2), Color(1, 1, 1, 0.25))
-		var pattern := s.to_pattern()
-		var total := pattern.length()
-		for k in s.syllables.size():
-			var x := tx + pattern.onset(k) / total * SHEET_W - GLYPH * 0.5
-			var done := active and k < _progress_step
-			_glyph(Vector2(roundf(x), y), s.syllables[k], 1.0 if done else 0.35, done)
+		var tx := sx + NAME_W
+		var pattern := s.to_pattern(2)
+		var span := pattern.onset(pattern.size() - 1) - pattern.onset(0)
+		for k in int(span) + 1:
+			draw_rect(Rect2(tx + k * BEAT_PX + GLYPH * 0.5, y + 9, 1, 2), Color(1, 1, 1, 0.25))
+		var start := s.family.start.size()
+		var end := pattern.size() - s.family.end.size()
+		for k in pattern.size():
+			var x := tx + (pattern.onset(k) - pattern.onset(0)) * BEAT_PX
+			var done := active and k < _progress_step and (k < end or _progress_step == 99)
+			# The family's shared start and end are dimmer than the spell's own middle.
+			var own := k >= start and k < end
+			_glyph(Vector2(roundf(x), y), pattern.syllables[k], 1.0 if done else (0.5 if own else 0.25), done)
 
 
 func _glyph(pos: Vector2, b: int, alpha: float, outline := false) -> void:

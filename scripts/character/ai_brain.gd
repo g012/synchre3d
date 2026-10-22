@@ -146,17 +146,28 @@ func _update_chant(c: ArenaCharacter, delta: float) -> void:
 	if not spell:
 		_cast_wait = 0.4
 		return
-	# First syllable on the next half beat, then the spell's rhythm.
+	var p := _choose_chant(spell)
+	# First syllable on the next half beat, then the chant's rhythm.
 	var start := ceilf(b * 2.0 + 0.5) * 0.5
-	var p := spell.to_pattern()
 	var flub := _rng.randi_range(1, p.size() - 1) if _rng.randf() < flub_chance else -1
 	for k in p.size():
-		var button := spell.syllables[k]
+		var button := p.syllables[k]
 		if k == flub:
 			button = (button + _rng.randi_range(1, 3)) % 4
 		var wobble := _rng.randfn(0.0, timing_jitter * p.beats[k]) if k > 0 else 0.0
 		_plan.append({"beat": start + p.onset(k) - p.onset(0) + wobble, "button": button})
 	_plan_spell = spell
+
+
+## Which level to chant `spell` at: mostly the short ones (easy CPU).
+func _choose_chant(spell: SpellDefinition) -> RhythmPattern:
+	var options: Array[RhythmPattern] = []
+	var weights := PackedFloat32Array()
+	for p in caster.engine.patterns:
+		if p.payload == spell:
+			options.append(p)
+			weights.append([0.0, 0.45, 0.4, 0.15][clampi(p.level, 0, 3)])
+	return options[_rng.rand_weighted(weights)]
 
 
 ## A spell that suits the situation (weighted at random among the enabled ones), or null.

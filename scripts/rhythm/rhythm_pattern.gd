@@ -26,6 +26,8 @@ var beats := PackedFloat32Array()
 var syllables := PackedInt32Array()
 ## Arbitrary user data (e.g. the SpellDefinition this pattern casts).
 var payload: Variant = null
+## Optional power level of the payload this pattern casts (spell families).
+var level := 0
 
 
 func _init(new_name: String = "", new_beats: PackedFloat32Array = PackedFloat32Array(),

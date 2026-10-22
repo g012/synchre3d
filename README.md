@@ -33,6 +33,7 @@ Project Settings.
 | Jump | RT (analog, 50% threshold, one jump per pull) | Space | Numpad 0 / Numpad Enter |
 | Shove (melee push) | RB | E | Numpad . |
 | Dash (toward the stick, else forward; 0.65 s cooldown, one per jump in the air) | LB | Left Shift | Numpad + |
+| Toggle auto-aim (on by default) | LT | Q | Numpad − |
 | Switch 1P ⇄ 2P (new game: scores reset, tempo chosen again) | Back | Tab | |
 | Restart round | Start | R | |
 | Fullscreen / debug: hide outline pass | | F11 / F1 | |
@@ -62,29 +63,50 @@ console). The camera follows both fighters and zooms out a little when they are 
    that moves to the music (metronome, dancing flowers) for the whole match; switching 1P/2P
    starts a new game and asks again. (Tempo spells from the book can slide it; the new
    tempo carries over to the following rounds.)
-2. **Chant.** Each spell is one measure (4 beats) of syllables in a set rhythm:
+2. **Chant.** Spells come in **families** that share the start and the end of their chant;
+   each spell has its own middle. Chant the start and the end alone for a quick **level 1**
+   (the family's first spell), add the spell's middle once for **level 2**, twice for
+   **level 3**: longer chants, stronger spells.
 
-   | Spell | Buttons | Rhythm (beats before each note) | Effect |
-   |---|---|---|---|
-   | **Push** | A B X Y A | 1, ½, ½, 1, 1 (the original `basic1` pattern) | A big, fast ball of light from your hands shoves the first rival it touches, about twice as far as the RB shove |
-   | **Open Pit** | X Y X Y | 1½, ½, 1½, ½ (the original `basic2` pattern) | Digs in front of you: a mountain sinks to a hill, a hill to a bump, a bump to flat ground, and only flat ground opens into a real hole (about 2.4 units ahead) |
-   | **Mend Earth** | B Y B Y A | 1, 1, ½, ½, 1 | Closes the nearest hole in a cone in front of you (not the ones at your sides). With no hole there it raises the ground 2.2 units ahead into a **bump**; cast it again at that mound for a **hill**, and again for a **mountain**. Rising ground throws anyone standing on it outward (harder at each level); the caster just rides it. |
+   | Family | Start … End | Spells (middle) |
+   |---|---|---|
+   | Force | A A … Y | **Push** (B X), Shockwave (X X) |
+   | Earth | X Y … X | **Open Pit** (Y Y), Mend Earth (B A) |
+   | Time | Y B … Y | **Hasten** (A X), Slow (B B) |
+   | Hex | B X … A | **Knockout** (Y), Swap (X X), Minion (B Y) |
 
-   Every note must land within 20% of its own duration, measured against the match tempo.
-   **A spell can start on any beat** (or between beats): there is no bar to wait for, the
-   rhythm is checked relative to your own first syllable, as in the original. The right
-   buttons in the wrong rhythm do not cast.
+   The first spell of each family (in bold) also has level 1: Push level 1 is just
+   A A Y, level 2 A A B X Y, level 3 A A B X B X Y. Rhythms, effects and per-level numbers
+   are in the [spell book](docs/spellbook.md).
+
+   Timing is forgiving: each note may land within **40%** of its own duration (twice the
+   original Synchre's 20%), but **precision** scales the spell's power: a chant dead on the
+   beat casts at full power, a sloppy one down to 55% (`power_range` on `SpellCaster`).
+   **A spell can start on any beat** (or between beats): the rhythm is checked relative to
+   your own first syllable, as in the original.
+
+   **Auto-aim** (on by default, toggle with **LT** / Q / Numpad −): aimed spells (Push,
+   Swap, Knockout, Open Pit, Mend Earth's raised ground, Minion) turn you toward your
+   opponent as they fire. Mend Earth still closes the holes in front of where you faced.
 3. **Read the feedback.** Gathered magic grows at your hands with each correct syllable, and
    your character poses and bobs. While your syllables could still become several spells
    (they share an opening, like X for Open Pit, Swap and Knockout), the magic is a pale,
    shared glow with a small satellite in each possible spell's color; satellites fold into
    it as the chant rules their spell out, and once one spell is left the glow morphs into
-   its color. It only fizzles when no spell can continue the chant. The rhythm panel (bottom-left; P2 bottom-right) shows:
+   its color. It only fizzles when no spell can continue the chant.
+
+   A **ring at your feet** pulses on every beat (a wider wave on each bar's first beat), so
+   you can keep time without looking away from the fight, and shows the chant in progress:
+   one pip per syllable, clockwise from the top, lit in the button's color once validated,
+   faint for the ones still to come. The CPU has one too.
+
+   The rhythm panel (bottom-left; P2 bottom-right; the CPU's is compact) shows:
    - your last syllables with a timing tick for each: centred = on time, shifted left or blue
      = early, right or orange = late, red cross = out of tolerance
-   - each spell's notes on a 4-beat timeline, lighting up as you play them (every spell
-     still possible is lit)
-   - the outcome: `PUSH!`, or a fizzle with its reason (`wrong syllable`, `too early`,
+   - each spell's level-2 chant on a beat timeline, grouped by family with the shared start
+     and end dimmed, lighting up as you play them (every spell still possible is lit)
+   - whether auto-aim is on
+   - the outcome: `PUSH LV2 87%` (level and precision), or a fizzle with its reason (`wrong syllable`, `too early`,
      `too late`, `tempo lost`). A fizzle dissipates the magic in grey puffs.
 
 Every syllable has its own chanted voice (Ah, Bra, Ca and Da on the notes A3, C4, D4 and E4,
@@ -103,8 +125,8 @@ bolts, which otherwise glide over gentle slopes. Holes can be opened through a h
 
 The CPU opponent chants too (easy for now): every few seconds it picks a spell that suits
 the situation (Push at range, Open Pit when you're a couple of steps ahead, Mend Earth near
-a hole), presses the syllables on the beat with a little wobble, and now and then flubs a
-syllable and fizzles. Its rhythm panel is shown bottom-right, so you can read what's coming.
+a hole...), mostly at level 1 or 2, presses the syllables on the beat with a little wobble,
+and now and then flubs a syllable and fizzles. Its ring shows what it is chanting.
 
 ## What's in the box
 
@@ -265,7 +287,8 @@ Spell effects are separate from recognition and could be resolved authoritativel
 | Bump / hill / mountain size and growth time | `MOUND_LEVELS`, `MOUND_GROW_TIME` in `scripts/arena/arena.gd` |
 | Camera follow margin, max zoom-out | Exported vars on `scripts/render/pixel_camera.gd` |
 | Move speed, acceleration, jump velocity, air control, push strength, knockback friction, hit-stop | Exported vars on `scripts/character/character.gd` |
-| Spells (buttons, rhythm, effect, color) | `assets/spells/spellbook.tres` |
+| Spells and families (buttons, rhythm, effect, color) | `assets/spells/spellbook.tres` |
+| Timing tolerance, precision-to-power range | `timing_tolerance`, `power_range` on `scripts/spells/spell_caster.gd` |
 | Pit radius and placement, Mend Earth reach, mound distance and knockback | Exported vars on `scripts/spells/spell_effects.gd` |
 | Sounds | `python3 tools/gen_audio.py` (numpy), volumes on `spell_caster.gd` / `spell_effects.gd` |
 | Push bolt speed, range, size, strength | `scripts/spells/magic_bolt.gd` |
@@ -308,7 +331,7 @@ tools/        palette / sprite / font generators, blender/ build scripts
 godot --headless --path . -s tests/test_rhythm.gd
 ```
 
-The suite has 98 checks covering:
+The suite has 87 checks covering:
 
 - tempo lock time and BPM
 - tempo tolerance boundaries
@@ -325,7 +348,10 @@ The suite has 98 checks covering:
 - rapid successive casts and consumed taps
 - tempo drift within and beyond tolerance
 - restarting an incantation
-- the spell book: every spell (ideas included) castable and never mistaken for another
+- the spell book: families and levels; every chant of every level castable and never
+  mistaken for another, at the original and the game tolerance
+- precision: a dead-on chant scores 1, a sloppy one less; the wide tolerance accepts what
+  the original rejects
 - tempo slides: a chant following a slide is cast, a nearly finished one still lands
 - shared openings: progress follows every possible spell, narrows without fizzling, drops a
   spell whose next note is overdue without failing the others, and fizzles once when none fits

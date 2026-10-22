@@ -2,95 +2,141 @@
 
 [ext_resource type="Script" uid="uid://xglpiunhycnl" path="res://scripts/spells/spell_book.gd" id="1_book"]
 [ext_resource type="Script" uid="uid://dmahyoj6rho6i" path="res://scripts/spells/spell_definition.gd" id="2_def"]
+[ext_resource type="Script" uid="uid://dxnlob6hgg5kj" path="res://scripts/spells/spell_family.gd" id="3_family"]
+
+[sub_resource type="Resource" id="force"]
+script = ExtResource("3_family")
+id = &"force"
+display_name = "Force"
+start = PackedInt32Array(0, 0)
+start_beats = PackedFloat32Array(1, 0.5)
+end = PackedInt32Array(3)
+end_beats = PackedFloat32Array(1)
 
 [sub_resource type="Resource" id="push"]
 script = ExtResource("2_def")
 id = &"push"
 display_name = "Push"
-syllables = PackedInt32Array(0, 1, 2, 3, 0)
-beats = PackedFloat32Array(1, 0.5, 0.5, 1, 1)
-description = "Throws a big, fast ball of light that shoves the first enemy it touches (harder than the RB shove)."
-
-[sub_resource type="Resource" id="create_hole"]
-script = ExtResource("2_def")
-id = &"create_hole"
-display_name = "Open Pit"
-syllables = PackedInt32Array(2, 3, 2, 3)
-beats = PackedFloat32Array(1.5, 0.5, 1.5, 0.5)
-effect = 1
-palette_index = 11
-description = "Digs in front: a mountain sinks to a hill, a hill to a bump, a bump to flat ground, and flat ground opens into a pit."
-
-[sub_resource type="Resource" id="close_hole"]
-script = ExtResource("2_def")
-id = &"close_hole"
-display_name = "Mend Earth"
-syllables = PackedInt32Array(1, 3, 1, 3, 0)
-beats = PackedFloat32Array(1, 1, 0.5, 0.5, 1)
-effect = 2
-palette_index = 28
-description = "Closes a hole in a cone in front; with none, raises the ground ahead: bump, then hill, then mountain, shoving whoever stands there."
-
-[sub_resource type="Resource" id="hasten"]
-script = ExtResource("2_def")
-id = &"hasten"
-display_name = "Hasten"
-syllables = PackedInt32Array(3, 0, 3, 0)
-beats = PackedFloat32Array(1, 1.5, 1, 0.5)
-effect = 3
-palette_index = 7
-description = "Tempo change: the shared tempo slides up by 20 BPM (max 160) over one bar, so a chant almost finished still lands."
-
-[sub_resource type="Resource" id="slow"]
-script = ExtResource("2_def")
-id = &"slow"
-display_name = "Slow"
-syllables = PackedInt32Array(3, 1, 3, 1)
-beats = PackedFloat32Array(0.5, 0.5, 1, 2)
-effect = 4
-palette_index = 14
-description = "Tempo change: the shared tempo slides down by 20 BPM (min 80) over one bar."
-
-[sub_resource type="Resource" id="raise_minion"]
-script = ExtResource("2_def")
-id = &"raise_minion"
-display_name = "Raise Minion"
-syllables = PackedInt32Array(1, 0, 2, 0)
-beats = PackedFloat32Array(1, 1, 1, 1)
-effect = 5
-palette_index = 13
-description = "Necromancy: a small undead double climbs out of the ground in front and shoves enemies softly. Crumbles after 16 beats; no limit but chanting speed."
+family = SubResource("force")
+middle = PackedInt32Array(1, 2)
+middle_beats = PackedFloat32Array(0.5, 0.5)
+description = "Throws a ball of light that shoves the first enemy it touches. Bigger, faster and harder at each level; level 2 shoves about twice as far as the RB shove."
 
 [sub_resource type="Resource" id="shockwave"]
 script = ExtResource("2_def")
 id = &"shockwave"
 display_name = "Shockwave"
-syllables = PackedInt32Array(0, 0, 0, 3)
-beats = PackedFloat32Array(1, 1, 1, 1)
+family = SubResource("force")
+middle = PackedInt32Array(2, 2)
+middle_beats = PackedFloat32Array(1, 1)
 effect = 6
 palette_index = 4
-description = "A big blast all around the caster pushes every enemy away (stronger up close)."
+description = "A blast all around the caster pushes every enemy away (stronger up close). Wider and stronger at each level."
 
-[sub_resource type="Resource" id="swap_ball"]
+[sub_resource type="Resource" id="earth"]
+script = ExtResource("3_family")
+id = &"earth"
+display_name = "Earth"
+start = PackedInt32Array(2, 3)
+start_beats = PackedFloat32Array(1, 0.5)
+end = PackedInt32Array(2)
+end_beats = PackedFloat32Array(1)
+
+[sub_resource type="Resource" id="create_hole"]
 script = ExtResource("2_def")
-id = &"swap_ball"
-display_name = "Swap"
-syllables = PackedInt32Array(2, 0, 2, 0)
-beats = PackedFloat32Array(1, 0.5, 1.5, 1)
-effect = 7
-palette_index = 12
-description = "Throws a small, very fast ball: if it touches someone, caster and target swap places."
+id = &"create_hole"
+display_name = "Open Pit"
+family = SubResource("earth")
+middle = PackedInt32Array(3, 3)
+middle_beats = PackedFloat32Array(0.5, 0.5)
+effect = 1
+palette_index = 11
+description = "Digs in front: a mountain sinks to a hill, a hill to a bump, a bump to flat ground, and flat ground opens into a pit (wider at each level; level 3 digs two steps at once)."
+
+[sub_resource type="Resource" id="close_hole"]
+script = ExtResource("2_def")
+id = &"close_hole"
+display_name = "Mend Earth"
+family = SubResource("earth")
+middle = PackedInt32Array(1, 0)
+middle_beats = PackedFloat32Array(1, 0.5)
+effect = 2
+palette_index = 28
+description = "Closes a hole in a cone in front; with none, raises the ground ahead: bump, then hill, then mountain (level 3 raises two steps at once), shoving whoever stands there."
+
+[sub_resource type="Resource" id="time"]
+script = ExtResource("3_family")
+id = &"time"
+display_name = "Time"
+start = PackedInt32Array(3, 1)
+start_beats = PackedFloat32Array(1, 0.5)
+end = PackedInt32Array(3)
+end_beats = PackedFloat32Array(1)
+
+[sub_resource type="Resource" id="hasten"]
+script = ExtResource("2_def")
+id = &"hasten"
+display_name = "Hasten"
+family = SubResource("time")
+middle = PackedInt32Array(0, 2)
+middle_beats = PackedFloat32Array(0.5, 0.5)
+effect = 3
+palette_index = 7
+description = "Tempo change: the shared tempo slides up over one bar (+10 / +20 / +30 BPM by level, max 160), so a chant almost finished still lands."
+
+[sub_resource type="Resource" id="slow"]
+script = ExtResource("2_def")
+id = &"slow"
+display_name = "Slow"
+family = SubResource("time")
+middle = PackedInt32Array(1, 1)
+middle_beats = PackedFloat32Array(1, 1)
+effect = 4
+palette_index = 14
+description = "Tempo change: the shared tempo slides down over one bar (-10 / -20 / -30 BPM by level, min 80)."
+
+[sub_resource type="Resource" id="hex"]
+script = ExtResource("3_family")
+id = &"hex"
+display_name = "Hex"
+start = PackedInt32Array(1, 2)
+start_beats = PackedFloat32Array(1, 0.5)
+end = PackedInt32Array(0)
+end_beats = PackedFloat32Array(1)
 
 [sub_resource type="Resource" id="knockout"]
 script = ExtResource("2_def")
 id = &"knockout"
 display_name = "Knockout"
-syllables = PackedInt32Array(2, 1, 2, 3)
-beats = PackedFloat32Array(1, 1, 1.5, 0.5)
+family = SubResource("hex")
+middle = PackedInt32Array(3)
+middle_beats = PackedFloat32Array(1)
 effect = 8
 palette_index = 6
-description = "Throws a spinning star: whoever it hits is knocked out for 4 beats (can't move, but can be pushed)."
+description = "Throws a spinning star: whoever it hits is knocked out (2 / 4 / 6 beats by level): can't move, but can be pushed."
+
+[sub_resource type="Resource" id="swap_ball"]
+script = ExtResource("2_def")
+id = &"swap_ball"
+display_name = "Swap"
+family = SubResource("hex")
+middle = PackedInt32Array(2, 2)
+middle_beats = PackedFloat32Array(0.5, 0.5)
+effect = 7
+palette_index = 12
+description = "Throws a small, very fast ball (longer range at each level): if it touches someone, caster and target swap places."
+
+[sub_resource type="Resource" id="raise_minion"]
+script = ExtResource("2_def")
+id = &"raise_minion"
+display_name = "Minion"
+family = SubResource("hex")
+middle = PackedInt32Array(1, 3)
+middle_beats = PackedFloat32Array(1, 1)
+effect = 5
+palette_index = 13
+description = "Necromancy: a small undead double climbs out of the ground in front and shoves enemies softly. Crumbles after 8 / 16 / 24 beats by level; no limit but chanting speed."
 
 [resource]
 script = ExtResource("1_book")
-spells = Array[ExtResource("2_def")]([SubResource("push"), SubResource("create_hole"), SubResource("close_hole"), SubResource("hasten"), SubResource("slow"), SubResource("raise_minion"), SubResource("shockwave"), SubResource("swap_ball"), SubResource("knockout")])
+spells = Array[ExtResource("2_def")]([SubResource("push"), SubResource("shockwave"), SubResource("create_hole"), SubResource("close_hole"), SubResource("hasten"), SubResource("slow"), SubResource("knockout"), SubResource("swap_ball"), SubResource("raise_minion")])

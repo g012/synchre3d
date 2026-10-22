@@ -1,51 +1,81 @@
 # Spell book
 
-Every spell of Synchre, in play or not yet. They all live in
-`assets/spells/spellbook.tres` and all of them work: a spell is in play when its `enabled`
-flag is on (open the resource in the inspector, or flip `enabled = false` in the file).
-Only enabled spells can be chanted, show on the rhythm panel and are used by the CPU.
+Every spell of Synchre lives in `assets/spells/spellbook.tres`, and all of them work. A
+spell is in play when its `enabled` flag is on (in the inspector, or `enabled = false` in the
+file to take one out). Only enabled spells can be chanted, show on the rhythm panel and are
+used by the CPU.
 
-Buttons: A "Ah", B "Bra", X "Ca", Y "Da". Rhythm: beats before each note (the first value is
-the lead-in, so only the gaps after it matter); every spell fills one 4-beat measure. No two
-spells share their first two syllables, so a chant is never mistaken for another one (checked
-by `tests/test_rhythm.gd` with the whole book enabled). Spells may share a first syllable: until the
-chant tells them apart, the gathered magic shows all of them (see the README).
+## Families and levels
 
-## In play
+Spells are grouped in **families** that share the start and the end of their chant; each
+spell has its own **middle**:
 
-| Spell | Buttons | Rhythm | Effect |
+- **Level 1** = start + end. Short, weak. Only the family's first enabled spell has it.
+- **Level 2** = start + middle + end.
+- **Level 3** = start + middle + middle + end. Longest, strongest.
+
+Buttons: A "Ah", B "Bra", X "Ca", Y "Da". Every family starts with a different button and
+no chant is ever mistaken for another one, at any level (checked by `tests/test_rhythm.gd`
+with the whole book). While a chant is still ambiguous (a family's start), the gathered
+magic shows every spell it could become and narrows down as you go.
+
+**Precision:** each note may be off by up to 40% of its own duration; the chant's precision
+(100% = every note dead on the beat grid that fits it best) scales the spell's power from
+55% to 100%. The rhythm panel shows the result, e.g. `PUSH LV2 87%`.
+
+Rhythms below are the gaps in beats before each note (the first note's lead-in is left out).
+
+## Force: A A … Y (A A ½ apart, Y 1 beat after the last note)
+
+| Spell | Middle | Level 1 / 2 / 3 chant | Effect by level |
 |---|---|---|---|
-| Push | A B X Y A | 1, ½, ½, 1, 1 | A big, fast ball of light (radius 0.36, 16 u/s, 9 u range): the first enemy it touches is shoved about twice as far as by the RB shove. |
-| Open Pit | X Y X Y | 1½, ½, 1½, ½ | Digs in front: a mountain sinks to a hill, a hill to a bump, a bump to flat ground; only flat ground opens into a pit. |
-| Mend Earth | B Y B Y A | 1, 1, ½, ½, 1 | Closes the nearest hole inside a cone in front (25°, widened by the hole's size, rim within 3.6 u). With none, raises the ground ahead: bump, hill, mountain. |
+| **Push** | B X (½, ½) | A A Y / A A B X Y / A A B X B X Y | Ball of light shoving the first enemy it touches. Size 0.26 / 0.36 / 0.46, speed 14 / 16 / 18, knockback 10 / 15 / 19 (the RB shove is 7.5). |
+| Shockwave | X X (1, 1) | – / A A X X Y / A A X X X X Y | Blast around the caster pushing every enemy away. Radius 2.4 / 3.4 / 4.4, force ×0.8 / ×1 / ×1.2. |
 
-## Ideas, ready to test
+## Earth: X Y … X (Y ½ after X, X 1 beat after the last note)
 
-| Spell | Buttons | Rhythm | Effect |
+| Spell | Middle | Level 1 / 2 / 3 chant | Effect by level |
 |---|---|---|---|
-| Hasten | Y A Y A | 1, 1½, 1, ½ | Tempo change: the shared tempo slides up 20 BPM (max 160) over one bar. |
-| Slow | Y B Y B | ½, ½, 1, 2 | Tempo change: the shared tempo slides down 20 BPM (min 80) over one bar. |
-| Raise Minion | B A X A | 1, 1, 1, 1 | Necromancy: a small, shadowy double of the caster climbs out of the ground in front, chases the opponent and shoves softly. It crumbles after 16 beats. No limit on how many, other than chanting speed. Minions can be shoved, hit by spells and fall into holes. |
-| Shockwave | A A A Y | 1, 1, 1, 1 | A big blast around the caster (radius 3.4) blows every enemy away, harder up close. |
-| Swap | X A X A | 1, ½, 1½, 1 | A small, very fast ball (24 u/s): if it touches someone, caster and target trade places. |
-| Knockout | X B X Y | 1, 1, 1½, ½ | A spinning star: the target is knocked out for 4 beats. It can't move, jump, dash or shove (it can still chant), but it can be pushed. |
+| **Open Pit** | Y Y (½, ½) | X Y X / X Y Y Y X / X Y Y Y Y Y X | Digs in front: a mound sinks one step (two at level 3): mountain → hill → bump → flat; flat ground opens a pit of radius 0.6 / 0.85 / 1.1. |
+| Mend Earth | B A (1, ½) | – / X Y B A X / X Y B A B A X | Closes the nearest hole in a cone in front (where you faced, not where auto-aim turns you); with none, raises the ground ahead one step (two at level 3): bump → hill → mountain, shoving whoever stands there (×0.8 / ×1 / ×1.2). |
 
-### How the tempo slide works
+## Time: Y B … Y (B ½ after Y, Y 1 beat after the last note)
 
-The tempo never jumps: Hasten and Slow ramp it linearly over 4 beats, so a chant that is
-almost finished still lands. Behind the scenes the `BeatClock` keeps a tempo map, and every
-rhythm engine stays locked to the match tempo but receives *warped* timestamps (the time
-stretched so that beats of the current tempo fall where beats of the match tempo would).
-Recognition is therefore done in beats: a player who follows the metronome through the slide
-is judged exactly as at a steady tempo. The new tempo carries over to the following rounds; only a new game
-(1P/2P switch) asks for a tempo again.
+| Spell | Middle | Level 1 / 2 / 3 chant | Effect by level |
+|---|---|---|---|
+| **Hasten** | A X (½, ½) | Y B Y / Y B A X Y / Y B A X A X Y | The shared tempo slides up +10 / +20 / +30 BPM (max 160) over one bar, so a chant almost finished still lands. The new tempo carries over to the next rounds. |
+| Slow | B B (1, 1) | – / Y B B B Y / Y B B B B B Y | The shared tempo slides down −10 / −20 / −30 BPM (min 80) over one bar. |
+
+## Hex: B X … A (X ½ after B, A 1 beat after the last note)
+
+| Spell | Middle | Level 1 / 2 / 3 chant | Effect by level |
+|---|---|---|---|
+| **Knockout** | Y (1) | B X A / B X Y A / B X Y Y A | Spinning star: the target is knocked out 2 / 4 / 6 beats. It can't move, jump, dash or shove (it can still chant), but it can be pushed. |
+| Swap | X X (½, ½) | – / B X X X A / B X X X X X A | Small, very fast ball: if it touches someone, caster and target trade places. Range 6 / 10 / 14. |
+| Minion | B Y (1, 1) | – / B X B Y A / B X B Y B Y A | Necromancy: a small, shadowy double of the caster climbs out of the ground in front, chases the opponent and shoves softly. Crumbles after 8 / 16 / 24 beats. No limit on how many. |
+
+Durations, distances and forces are also scaled by precision (55–100%).
+
+## How the tempo slide works
+
+The tempo never jumps: Hasten and Slow ramp it linearly over 4 beats. Behind the scenes the
+`BeatClock` keeps a tempo map, and every rhythm engine stays locked to the match tempo but
+receives *warped* timestamps (the time stretched so that beats of the current tempo fall
+where beats of the match tempo would). Recognition is therefore done in beats: a player who
+follows the metronome through the slide is judged exactly as at a steady tempo. The new
+tempo carries over to the following rounds; only a new game (1P/2P switch) asks for a tempo
+again.
 
 ## Tuning
 
-Numbers for the book spells are exported on `scripts/spells/spell_effects.gd` (group "Book
-spells"): tempo step and slide length, minion lifetime / size / shove, shockwave radius and
-force, knockout length. Projectile sizes and speeds are set in `_cast_bolt` there.
+- Families, middles, rhythms, colors: `assets/spells/spellbook.tres` (`SpellFamily` and
+  `SpellDefinition` resources). Reorder the spells to change which one owns level 1.
+- Per-level numbers: `_lv(...)` calls in `scripts/spells/spell_effects.gd`, plus its
+  exported base values (group "Book spells").
+- Tolerance and the precision-to-power range: `timing_tolerance`, `power_range` on
+  `scripts/spells/spell_caster.gd`.
 
 ## More ideas
 
-Add new ideas here, then as a disabled `SpellDefinition` in the book once they work.
+Add new ideas here, then as a `SpellDefinition` in a family (or a new family with an
+unused start) once they work.
