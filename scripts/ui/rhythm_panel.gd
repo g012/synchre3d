@@ -49,10 +49,19 @@ func setup(c: SpellCaster, player_title: String, pixel_font: Font, palette: Imag
 		_candidates = caster.candidates())
 	caster.fizzled.connect(_on_fizzled)
 	caster.cast.connect(_on_cast)
-	var w := 108 + NAME_W + SHEET_W + GLYPH + 4 if show_sheets else 108
-	custom_minimum_size = Vector2(w, maxi(48, 5 + ROW * c.book.active().size()) if show_sheets else 48)
-	size = custom_minimum_size
+	_resize()
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+
+func set_sheets(on: bool) -> void:
+	show_sheets = on
+	_resize()
+
+
+func _resize() -> void:
+	var w := 108 + NAME_W + SHEET_W + GLYPH + 4 if show_sheets else 108
+	custom_minimum_size = Vector2(w, maxi(48, 5 + ROW * caster.book.active().size()) if show_sheets else 48)
+	size = custom_minimum_size
 
 
 static func button_color(palette: Image, b: int) -> Color:
@@ -77,7 +86,8 @@ func _on_judged(j: Dictionary) -> void:
 
 
 func _on_fizzled(spell: SpellDefinition, _step: int, reason: String) -> void:
-	_result = "%s FIZZLED: %s" % [spell.display_name.to_upper(), reason.to_upper()]
+	# Just the reason (in red): it has to fit the left column.
+	_result = reason.to_upper()
 	_result_color = Color("e66d47")
 	_result_time = PlayerInput.now_seconds()
 

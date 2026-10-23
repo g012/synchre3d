@@ -67,7 +67,7 @@ The tempo never jumps: Hasten and Slow ramp it linearly over 4 beats. Behind the
 receives *warped* timestamps (the time stretched so that beats of the current tempo fall
 where beats of the match tempo would). Recognition is therefore done in beats: a player who
 follows the metronome through the slide is judged exactly as at a steady tempo. The new
-tempo carries over to the following rounds; only a new game (1P/2P switch) asks for a tempo
+tempo carries over to the following rounds; only a new game (from the menu) asks for a tempo
 again.
 
 ## Tuning

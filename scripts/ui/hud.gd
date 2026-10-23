@@ -18,6 +18,15 @@ var _message_time := 0.0
 var _message_base_y := 0.0
 var _palette: Image
 var _panels: Array[RhythmPanel] = []
+var _top: HBoxContainer
+var _status: Label
+var _menu: VBoxContainer
+var _menu_plate: ColorRect
+## Spell sheets on the rhythm panels (toggled to practise without reading them).
+var sheets_visible := true
+var _menu_title: Label
+var _menu_items: Array[Label] = []
+var _menu_footer: Label
 
 
 func _ready() -> void:
@@ -45,6 +54,44 @@ func _ready() -> void:
 	for l in [_name_a, _score, _name_b]:
 		top.add_child(l)
 	top.resized.connect(func(): top.position.x = (_root.size.x - top.size.x) * 0.5)
+	_top = top
+
+	# Survival: health, time and kills instead of names and score.
+	_status = _label(16)
+	_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_status.position.y = 6
+	_status.visible = false
+	_root.add_child(_status)
+
+	# Title menu, on a dark plate so it reads over the grass.
+	_menu_plate = ColorRect.new()
+	_menu_plate.color = Color(0.17, 0.13, 0.21, 0.72)
+	_menu_plate.visible = false
+	_menu_plate.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_root.add_child(_menu_plate)
+	_menu = VBoxContainer.new()
+	_menu.alignment = BoxContainer.ALIGNMENT_CENTER
+	_menu.add_theme_constant_override("separation", 6)
+	_menu.visible = false
+	_menu.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_root.add_child(_menu)
+	_menu_title = _label(32)
+	_menu_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_menu.add_child(_menu_title)
+	var gap := Control.new()
+	gap.custom_minimum_size = Vector2(0, 10)
+	_menu.add_child(gap)
+	for i in 3:
+		var l := _label(16)
+		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_menu.add_child(l)
+		_menu_items.append(l)
+	var gap2 := Control.new()
+	gap2.custom_minimum_size = Vector2(0, 10)
+	_menu.add_child(gap2)
+	_menu_footer = _label(8)
+	_menu_footer.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_menu.add_child(_menu_footer)
 
 	_message = _label(24)
 	_message.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -83,6 +130,12 @@ func _layout() -> void:
 	_sub.size = Vector2(s.x, 10)
 	_sub.position = Vector2(0, _message_base_y + 32)
 	_hint.position = Vector2(6, s.y - 14)
+	if _menu:
+		_menu.size = Vector2(s.x, 0)
+		var mh := _menu.get_combined_minimum_size().y
+		_menu.position = Vector2(0, floorf((s.y - mh) * 0.45))
+		_menu_plate.size = Vector2(360, mh + 20)
+		_menu_plate.position = Vector2(floorf((s.x - 360) * 0.5), _menu.position.y - 10)
 	_mode.position = Vector2(6, 6)
 	for i in _panels.size():
 		var p := _panels[i]
@@ -101,12 +154,61 @@ func set_score(a: int, b: int) -> void:
 	_score.text = "%d - %d" % [a, b]
 
 
-func set_mode(two_player: bool) -> void:
-	_mode.text = "2P LOCAL" if two_player else "1P VS CPU"
-	if two_player:
-		_hint.text = "PADS 1+2 / P1 WASD IJKL SPC SHIFT E Q / P2 ARROWS NUM 2468 0 + . -  TAB 1P"
-	else:
-		_hint.text = "STICK/WASD MOVE  ABXY (KLJI) CHANT  RT/SPACE JUMP  LB/SHIFT DASH  RB/E SHOVE  LT/Q AIM"
+## `mode`: "menu", "cpu", "human" or "survival".
+func set_mode(mode: String) -> void:
+	_top.visible = mode == "cpu" or mode == "human"
+	_status.visible = mode == "survival"
+	_hint.visible = mode != "menu"
+	_mode.visible = mode != "menu"
+	match mode:
+		"human":
+			_mode.text = "DUEL VS HUMAN"
+			_hint.text = "PADS 1+2 / P1 WASD IJKL SPC SHIFT E Q / P2 ARROWS NUM 2468 0 + . -  BACK/TAB MENU"
+		"cpu":
+			_mode.text = "DUEL VS CPU"
+			_hint.text = "STICK/WASD MOVE  ABXY (KLJI) CHANT  RT/SPC JUMP  LB/SHIFT DASH  RB/E SHOVE  LT/Q AIM  BACK MENU"
+		"survival":
+			_mode.text = "SURVIVAL"
+			_hint.text = "STICK/WASD MOVE  ABXY (KLJI) CHANT  RT/SPC JUMP  LB/SHIFT DASH  RB/E SHOVE  LT/Q AIM  BACK MENU"
+
+
+## Survival readout at the top (health, time, kills).
+func set_status(text: String, color := Color.WHITE) -> void:
+	_status.text = text
+	_status.add_theme_color_override("font_color", color)
+	_status.size = Vector2(_root.size.x, 18)
+	_status.position.x = 0
+
+
+func show_menu(title: String, items: Array[String], selected: int, footer: String) -> void:
+	_menu.visible = true
+	_menu_plate.visible = true
+	_menu_title.text = title
+	_menu_title.add_theme_color_override("font_color", palette_color(28, 3))
+	for i in _menu_items.size():
+		var l := _menu_items[i]
+		l.visible = i < items.size()
+		if i >= items.size():
+			continue
+		var on := i == selected
+		l.text = ("> %s <" if on else "%s") % items[i]
+		l.add_theme_color_override("font_color", palette_color(6, 3) if on else Color(1, 1, 1, 0.7))
+	_menu_footer.text = footer
+	_layout()
+
+
+func hide_menu() -> void:
+	_menu.visible = false
+	_menu_plate.visible = false
+
+
+## Shows or hides the spell sheets on the players' rhythm panels.
+func toggle_sheets() -> void:
+	sheets_visible = not sheets_visible
+	for p in _panels:
+		if p.title != "CPU":
+			p.set_sheets(sheets_visible)
+	_layout()
 
 
 ## One rhythm readout per human caster: P1 bottom-left, P2 bottom-right.
@@ -118,7 +220,7 @@ func set_rhythm_panels(casters: Array[SpellCaster], titles: Array[String] = []) 
 		if casters[i] == null:
 			continue
 		var panel := RhythmPanel.new()
-		panel.show_sheets = titles.is_empty() or titles[i] != "CPU"
+		panel.show_sheets = (titles.is_empty() or titles[i] != "CPU") and sheets_visible
 		panel.setup(casters[i], titles[i] if i < titles.size() else "P%d" % (i + 1), _font, _palette)
 		_root.add_child(panel)
 		_panels.append(panel)

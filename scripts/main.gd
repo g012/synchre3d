@@ -1,7 +1,11 @@
 extends Node
-## Game flow: spawns the two fighters, lets player 1 set the match tempo, runs rounds
-## (intro -> fight -> winner -> reset), tracks wins, and handles the 1P / 2P toggle and
-## debug keys.
+## Game flow: the title menu, then one of three modes, and debug keys.
+##
+## * Duel vs CPU / vs human: two fighters on the island, rounds (intro -> fight -> winner ->
+##   reset) and wins.
+## * Single player (survival): Pip alone on the endless field (Arena.endless) while the
+##   Survival director sends enemies, until Pip falls or runs out of health.
+## Back / Tab / Esc returns to the menu from any mode.
 ##
 ## Tempo: before the first round player 1 taps four even beats (the original Synchre
 ## count-in rule, clamped to 80-160 BPM); the match starts as soon as they lock. That tempo
@@ -17,7 +21,12 @@ const PIP_MODEL := preload("res://assets/models/pip.glb")
 const MOG_MODEL := preload("res://assets/models/mog.glb")
 const SPELLBOOK := preload("res://assets/spells/spellbook.tres")
 
-enum Phase { TEMPO, INTRO, FIGHT, ROUND_OVER }
+enum Mode { MENU, SURVIVAL, DUEL_CPU, DUEL_HUMAN }
+enum Phase { MENU, TEMPO, INTRO, FIGHT, ROUND_OVER, RUN, GAME_OVER }
+
+const MENU_ITEMS: Array[String] = ["SINGLE PLAYER - SURVIVAL", "DUEL VS CPU", "DUEL VS HUMAN"]
+## Survival: Pip's health.
+const SURVIVAL_HP := 100.0
 
 ## Delay after a round ends before the next one starts.
 @export var round_over_time := 2.6
@@ -31,10 +40,14 @@ enum Phase { TEMPO, INTRO, FIGHT, ROUND_OVER }
 @onready var post: MeshInstance3D = $PixelView/GameViewport/World/Camera/PostProcess
 @onready var spells: SpellEffects = $PixelView/GameViewport/World/Spells
 
+var mode := Mode.MENU
 var two_player := false
 var scores := [0, 0]
 var fighters: Array[ArenaCharacter] = []
-var phase := Phase.INTRO
+var phase := Phase.MENU
+var survival: Survival
+var _menu_index := 0
+var _camera_home := Vector3.ZERO
 var phase_time := 0.0
 var _landed := 0
 var _round_decided := false
@@ -61,8 +74,81 @@ func _ready() -> void:
 	beat_clock = BeatClock.new()
 	beat_clock.name = "BeatClock"
 	add_child(beat_clock)
+	survival = Survival.new()
+	survival.name = "Survival"
+	survival.arena = arena
+	survival.fx = fx
+	survival.camera = camera
+	world.add_child(survival)
+	_camera_home = camera.focus
+	enter_menu()
+
+
+# ------------------------------------------------------------------ menu and modes
+
+## Title menu over the island: everything stops, fighters leave the stage.
+func enter_menu() -> void:
+	mode = Mode.MENU
+	phase = Phase.MENU
+	survival.stop()
+	survival.clear()
+	beat_clock.stop()
+	for c in casters:
+		if c:
+			c.listening = false
+			c.cancel()
+	if arena.endless:
+		arena.endless = false
+		arena.rebuild()
+	else:
+		arena.reset_ground()
+	spells.clear()
+	for f in fighters:
+		_bench(f, true)
+	camera.targets = []
+	camera.focus = _camera_home
+	hud.set_panels_visible(false)
+	hud.hide_message()
+	hud.set_mode("menu")
+	_show_menu()
+
+
+func _show_menu() -> void:
+	hud.show_menu("SYNCHRE", MENU_ITEMS, _menu_index,
+		"STICK / D-PAD: CHOOSE    A / ENTER: START\nIN GAME  R3 / F2: HIDE SPELL SHEETS    BACK: MENU")
+
+
+func _start_mode(m: Mode) -> void:
+	hud.hide_menu()
+	mode = m
+	scores = [0, 0]
+	if m == Mode.SURVIVAL:
+		arena.endless = true
+		arena.focus = Vector2.ZERO
+		arena.rebuild()
+		_bench(fighters[0], false)
+		_bench(fighters[1], true)
+	else:
+		two_player = m == Mode.DUEL_HUMAN
+		for f in fighters:
+			_bench(f, false)
 	_apply_mode()
 	begin_tempo_setup()
+
+
+## A benched fighter is out of the game: hidden, frozen, untouchable.
+func _bench(f: ArenaCharacter, benched: bool) -> void:
+	f.visible = not benched
+	f.process_mode = Node.PROCESS_MODE_DISABLED if benched else Node.PROCESS_MODE_INHERIT
+	f.collision_layer = 0 if benched else Arena.LAYER_CHARACTERS
+	if benched:
+		f.remove_from_group(ArenaCharacter.GROUP)
+	elif not f.is_in_group(ArenaCharacter.GROUP):
+		f.add_to_group(ArenaCharacter.GROUP)
+
+
+func _is_benched(f: ArenaCharacter) -> bool:
+	return f.process_mode == Node.PROCESS_MODE_DISABLED
 
 
 func _make_fighter(display: String, model: PackedScene, color: int) -> ArenaCharacter:
@@ -82,6 +168,14 @@ func _make_fighter(display: String, model: PackedScene, color: int) -> ArenaChar
 
 
 func _apply_mode() -> void:
+	if mode == Mode.SURVIVAL:
+		_apply_survival()
+		return
+	fighters[0].opponent = fighters[1]
+	fighters[1].opponent = fighters[0]
+	for f in fighters:
+		f.max_hp = 0.0
+		f.auto_activate = false
 	var titles: Array[String] = []
 	for i in fighters.size():
 		var human := i == 0 or two_player
@@ -99,9 +193,25 @@ func _apply_mode() -> void:
 			var ai := AIBrain.new(arena, randi())
 			ai.caster = casters[i]
 			fighters[i].brain = ai
-	hud.set_mode(two_player)
+	hud.set_mode("human" if two_player else "cpu")
 	hud.set_score(scores[0], scores[1])
 	hud.set_rhythm_panels(casters, titles)
+
+
+## Survival: Pip alone, played with either pad or keyboard side, with health.
+func _apply_survival() -> void:
+	_set_human(0, true)
+	_set_human(1, false)
+	inputs[0].prefixes = ["p1_", "p2_"]
+	var pip := fighters[0]
+	pip.brain = PlayerBrain.new(inputs[0])
+	pip.opponent = null
+	pip.max_hp = SURVIVAL_HP
+	pip.auto_activate = true
+	survival.player = pip
+	hud.set_mode("survival")
+	var solo: Array[SpellCaster] = [casters[0]]
+	hud.set_rhythm_panels(solo, ["P1"] as Array[String])
 
 
 ## Gives fighter `i` a SpellCaster (once), plus a PlayerInput feeding it when human.
@@ -149,6 +259,8 @@ func begin_tempo_setup() -> void:
 	for c in casters:
 		if c:
 			c.listening = false
+	survival.stop()
+	survival.clear()
 	_reset_arena_and_spawn()
 	hud.set_panels_visible(false)
 	_show_tempo_message()
@@ -192,21 +304,43 @@ func _show_tempo_message() -> void:
 
 ## Tempo locked: every caster joins the shared tempo and the first round starts.
 func _start_match() -> void:
-	for c in casters:
-		if c:
+	for i in casters.size():
+		var c := casters[i]
+		if c and not _is_benched(fighters[i]):
 			c.set_tempo(beat_clock.bpm, beat_clock.origin)
 			c.cancel()
 			c.listening = true
 	hud.set_panels_visible(true)
-	start_round()
+	if mode == Mode.SURVIVAL:
+		_start_run(false)
+	else:
+		start_round()
+
+
+## A survival run: fresh endless field (unless just built), Pip at the origin, go.
+func _start_run(new_field := true) -> void:
+	if new_field:
+		arena.focus = Vector2.ZERO
+		arena.rebuild()
+	phase = Phase.RUN
+	phase_time = 0.0
+	_reset_arena_and_spawn()
+	survival.start()
+	hud.show_message("SURVIVE!", hud.palette_color(6, 3), "PUSH THEM INTO THE HOLES")
 
 
 func _reset_arena_and_spawn() -> void:
-	arena.reset_ground()
+	if not arena.endless:
+		arena.reset_ground()
 	spells.clear()
 	for c in casters:
 		if c:
 			c.cancel()
+	if mode == Mode.SURVIVAL:
+		fighters[0].spawn(Vector3.ZERO, Vector3.FORWARD)
+		_update_camera_targets()
+		camera.snap_to_targets()
+		return
 	var sp := arena.layout.spawn_points
 	for i in fighters.size():
 		var p := sp[i % sp.size()]
@@ -231,7 +365,7 @@ func _on_landed(_c: ArenaCharacter) -> void:
 
 
 func _on_fell(c: ArenaCharacter) -> void:
-	if phase != Phase.FIGHT or _round_decided:
+	if mode == Mode.SURVIVAL or phase != Phase.FIGHT or _round_decided:
 		return
 	# The round is decided the moment someone loses their footing.
 	_round_decided = true
@@ -250,12 +384,52 @@ func _on_fell(c: ArenaCharacter) -> void:
 func _on_eliminated(c: ArenaCharacter) -> void:
 	fx.vanish(c.global_position + Vector3.UP * 0.3)
 	camera.shake(0.3)
+	if mode == Mode.SURVIVAL:
+		if phase == Phase.RUN:
+			_game_over(c.hp <= 0.0 and c.max_hp > 0.0)
+		return
 	# Both fell before the round was decided (e.g. simultaneous): a draw.
 	if not _round_decided:
 		_round_decided = true
 		hud.show_message("DRAW!", hud.palette_color(1, 3))
 		phase = Phase.ROUND_OVER
 		phase_time = 0.0
+
+
+## Survival run over: the field keeps going behind the score.
+func _game_over(defeated: bool) -> void:
+	phase = Phase.GAME_OVER
+	phase_time = 0.0
+	survival.stop()
+	var t := int(survival.time)
+	hud.show_message("DEFEATED" if defeated else "YOU FELL", hud.palette_color(4, 3),
+		"SURVIVED %d:%02d  -  %d KILLS     START / R: AGAIN    BACK: MENU" % [t / 60, t % 60, survival.kills])
+
+
+func _update_survival_status() -> void:
+	var pip := fighters[0]
+	var t := int(survival.time)
+	var hp_color := hud.palette_color(4, 3) if pip.hp < SURVIVAL_HP * 0.3 else Color.WHITE
+	hud.set_status("HP %d    %d:%02d    KILLS %d" % [ceili(pip.hp), t / 60, t % 60, survival.kills], hp_color)
+
+
+func _process(_delta: float) -> void:
+	if mode != Mode.MENU:
+		return
+	var moved := 0
+	for a in ["ui_up", "p1_up", "p2_up"]:
+		if Input.is_action_just_pressed(a):
+			moved = -1
+	for a in ["ui_down", "p1_down", "p2_down"]:
+		if Input.is_action_just_pressed(a):
+			moved = 1
+	if moved != 0:
+		_menu_index = posmod(_menu_index + moved, MENU_ITEMS.size())
+		_show_menu()
+	for a in ["ui_accept", "p1_syl_a", "p2_syl_a", "restart_round"]:
+		if Input.is_action_just_pressed(a):
+			_start_mode([Mode.SURVIVAL, Mode.DUEL_CPU, Mode.DUEL_HUMAN][_menu_index])
+			return
 
 
 func _physics_process(delta: float) -> void:
@@ -280,6 +454,11 @@ func _physics_process(delta: float) -> void:
 		Phase.ROUND_OVER:
 			if phase_time > round_over_time:
 				start_round()
+		Phase.RUN:
+			if phase_time > 1.5 and hud._message.text == "SURVIVE!":
+				hud.hide_message()
+	if mode == Mode.SURVIVAL:
+		_update_survival_status()
 	_update_grass_actors()
 	_update_camera_targets()
 
@@ -287,9 +466,10 @@ func _physics_process(delta: float) -> void:
 func _update_camera_targets() -> void:
 	var t: Array[Node3D] = []
 	for f in fighters:
-		if f.state != ArenaCharacter.State.OUT:
+		if f.state != ArenaCharacter.State.OUT and not _is_benched(f):
 			t.append(f)
-	camera.targets = t
+	if mode != Mode.MENU:
+		camera.targets = t
 
 
 func _update_grass_actors() -> void:
@@ -297,22 +477,26 @@ func _update_grass_actors() -> void:
 	for i in fighters.size():
 		var f := fighters[i]
 		var v := Vector4(0.0, -100.0, 0.0, 0.0)
-		if f.is_alive() and f.state != ArenaCharacter.State.SPAWNING:
+		if f.is_alive() and f.state != ArenaCharacter.State.SPAWNING and not _is_benched(f):
 			var p := f.global_position
 			v = Vector4(p.x, p.y, p.z, 0.75)
 		RenderingServer.global_shader_parameter_set(names[i], v)
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event.is_action_pressed("toggle_two_player"):
-		# A new game: scores reset and player 1 picks the tempo again.
-		two_player = not two_player
-		scores = [0, 0]
-		_apply_mode()
-		begin_tempo_setup()
+	var escape: bool = event is InputEventKey and event.pressed and not event.echo and (event as InputEventKey).keycode == KEY_ESCAPE
+	if event.is_action_pressed("toggle_two_player") or escape:
+		if mode != Mode.MENU:
+			enter_menu()
 	elif event.is_action_pressed("restart_round"):
-		if phase != Phase.TEMPO:
+		if mode == Mode.SURVIVAL and phase in [Phase.RUN, Phase.GAME_OVER]:
+			_start_run()
+		elif mode in [Mode.DUEL_CPU, Mode.DUEL_HUMAN] and phase != Phase.TEMPO:
 			start_round()
+	elif (event is InputEventJoypadButton and event.pressed and (event as InputEventJoypadButton).button_index == JOY_BUTTON_RIGHT_STICK) \
+			or (event is InputEventKey and event.pressed and not event.echo and (event as InputEventKey).keycode == KEY_F2):
+		# Hide / show the spell sheets: practise chanting from memory.
+		hud.toggle_sheets()
 	elif event.is_action_pressed("toggle_fullscreen"):
 		var w := get_window()
 		w.mode = Window.MODE_WINDOWED if w.mode == Window.MODE_FULLSCREEN else Window.MODE_FULLSCREEN
@@ -322,6 +506,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _mcp_state() -> Dictionary:
-	return {"phase": Phase.keys()[phase], "scores": scores, "two_player": two_player,
+	return {"mode": Mode.keys()[mode], "phase": Phase.keys()[phase], "scores": scores, "two_player": two_player,
+		"survival": {"time": snappedf(survival.time, 0.1), "kills": survival.kills, "alive": survival.alive_enemies()} if survival else {},
 		"bpm": beat_clock.current_bpm() if beat_clock else 0.0,
 		"decided": _round_decided, "message": hud._message.text if hud._message.visible else ""}

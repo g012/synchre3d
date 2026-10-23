@@ -17,6 +17,22 @@ than the Push spell. More spells wait in the [spell book](docs/spellbook.md).
   1440p (2×/3×/4×). Other window sizes use an anti-aliased pixel-art upscaler, so pixels stay
   the same size.
 
+## Modes
+
+The game opens on a **menu** (stick / D-pad / arrows to choose, A / Enter / Start to pick):
+
+- **Single player: survival.** Pip alone on an endless field riddled with holes. Enemies
+  (shadowy mushroom grunts) keep coming from just off screen and rush you, forever: more of
+  them, faster, tougher and in packs as the minutes pass. They die when they fall into a hole
+  or run out of health (shoves and spells hurt them); you lose when you fall or your health
+  (100) runs out. The top of the screen shows health, time and kills; after a run, Start
+  plays again. It is meant for practice: moving and chanting at the same time, then doing it
+  from memory with the spell sheets hidden (**R3 / F2** toggles them).
+- **Duel vs CPU** and **Duel vs human**: the island duels described below.
+
+**Back / Tab / Esc** returns to the menu from any mode. Every mode starts with player 1
+tapping the tempo.
+
 ## Controls
 
 The gamepad is the primary interface (Xbox layout). Pad 1 controls Pip; in 2-player mode pad 2
@@ -34,8 +50,9 @@ Project Settings.
 | Shove (melee push) | RB | E | Numpad . |
 | Dash (toward the stick, else forward; 0.65 s cooldown, one per jump in the air) | LB | Left Shift | Numpad + |
 | Toggle auto-aim (on by default) | LT | Q | Numpad − |
-| Switch 1P ⇄ 2P (new game: scores reset, tempo chosen again) | Back | Tab | |
-| Restart round | Start | R | |
+| Back to the menu | Back | Tab / Esc | |
+| Hide / show the spell sheets | R3 (right stick click) | F2 | |
+| Restart round (survival: new run) | Start | R | |
 | Fullscreen / debug: hide outline pass | | F11 / F1 | |
 
 Keyboard keys are bound by physical position, so they work the same on AZERTY. In 1-player
@@ -49,6 +66,14 @@ There is no "cast" button and movement is never locked while casting.
 edge. The survivor wins the round, the score updates and a new round starts after a short
 delay. Holes and mounds made by spells reset each round.
 
+**Survival field:** the same Arena node switches to an endless mode (`Arena.endless`): no
+island edge, flat ground that streams around the player (a fixed set of ground chunks moved
+along, collision chunks recycled, grass generated chunk by chunk), and holes generated per
+7×7 cell from a hash of the cell, so a place keeps its holes when you come back. The grass
+shader drops tufts over holes by itself, so grass never waits for holes. Enemies are
+ordinary fighters with health and a cheap `SwarmBrain` (rush, sidestep holes, shove);
+`scripts/survival.gd` spawns them and ramps the pressure up over three minutes.
+
 **Arena:** the island is twice as wide and deep as before (4× the area) and is generated
 afresh at every launch: a new outline, 11–15 holes, trees around the rim, bushes, rocks,
 stumps and mushrooms, and both spawn points on safe ground (the seed is printed to the
@@ -60,7 +85,7 @@ console). The camera follows both fighters and zooms out a little when they are 
    tap any face button four times evenly (the original Synchre count-in rule: the taps and
    the wait after them within ±20%). The tempo is clamped to **80–160 BPM**, and the match
    starts the moment it locks. That tempo is shared by both players, the CPU and everything
-   that moves to the music (metronome, dancing flowers) for the whole match; switching 1P/2P
+   that moves to the music (metronome, dancing flowers) for the whole match; going back to the menu
    starts a new game and asks again. (Tempo spells from the book can slide it; the new
    tempo carries over to the following rounds.)
 2. **Chant.** Spells come in **families** that share the start and the end of their chant;
@@ -241,7 +266,7 @@ holes and mounds animate (vsync is on by default).
   range check plus a cone check, then a fixed impulse, so they feel skill-based.
 - `scripts/character/player_brain.gd` and `ai_brain.gd` drive a character's movement, jump
   and melee push (RB for players).
-- `scripts/main.gd`: rounds, scoring, the 1P/2P toggle, per-player input and casters, and
+- `scripts/main.gd`: the menu and modes, rounds, scoring, survival runs, per-player input and casters, and
   the HUD.
 
 ### Spellcasting pipeline
@@ -313,6 +338,8 @@ Spell effects are separate from recognition and could be resolved authoritativel
 | Push bolt speed, range, size, strength | `scripts/spells/magic_bolt.gd` |
 | Rhythm tolerance, blank length, tempo from spell openings | `scripts/rhythm/rhythm_engine.gd` (`TOLERANCE` as in the original; `blank_beats`, `tempo_from_openings`) |
 | AI reaction time, edge fear, chanting rate / timing wobble / flub chance | `scripts/character/ai_brain.gd` |
+| Survival pressure: spawn ring, spawn interval, enemies alive, enemy health / speed / damage, ramp time | Exported vars on `scripts/survival.gd`; Pip's health `SURVIVAL_HP` in `scripts/main.gd` |
+| Spell damage (survival) | `bolt.damage` and `take_damage` calls in `scripts/spells/spell_effects.gd`; shove damage `push_damage` on the character |
 | Which spells are in play; book spell numbers | `enabled` in `assets/spells/spellbook.tres`; see `docs/spellbook.md` |
 | Pixel density (world units per pixel), camera angle and focus | `scripts/render/pixel_camera.gd` |
 | Outline and highlight thresholds and colors, sky | Uniforms in `shaders/post_outline.gdshader` |

@@ -23,6 +23,8 @@ var radius := 0.36
 ## Horizontal hit radius around the target's centre.
 var hit_radius := 0.8
 var strength := 15.0
+## Health taken from the target (survival).
+var damage := 0.0
 ## Knockout duration (s).
 var stun_time := 2.0
 ## Snare: speed multiplier and duration (s).
@@ -109,6 +111,7 @@ func _hit(target: ArenaCharacter) -> void:
 	var to := target.global_position - global_position
 	to.y = 0.0
 	var dir := (direction * 0.8 + to.normalized() * 0.2).normalized()
+	target.take_damage(damage, caster)
 	match kind:
 		Kind.PUSH:
 			target.receive_push(dir, strength, caster)

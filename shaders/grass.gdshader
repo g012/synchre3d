@@ -55,7 +55,9 @@ void vertex() {
 	// Tufts ride the mounds; steep slopes are bare rock.
 	vec3 hg = arena_height(base.xz);
 	base.y += hg.x;
-	v_drown = hg.x < WATER_LEVEL + 0.08 ? 1.0 : 0.0;
+	// Under pond water, on its sandy shore, or at a hole (holes stream in under the endless
+	// field's grass): not drawn.
+	v_drown = hg.x < WATER_LEVEL + 0.08 || arena_holes_dist(base.xz, -1.0) < 0.3 ? 1.0 : 0.0;
 	// abs(): the projection may carry a Y flip depending on the rendering backend.
 	float texel = 2.0 / abs(PROJECTION_MATRIX[1][1] * VIEWPORT_SIZE.y);
 	vec2 grid_off = mod(VIEWPORT_SIZE, 2.0) * 0.5 * texel;

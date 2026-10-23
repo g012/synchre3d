@@ -16,6 +16,7 @@ signal landed(character: ArenaCharacter)
 signal jumped(character: ArenaCharacter)
 signal dashed(character: ArenaCharacter)
 signal auto_aim_changed(character: ArenaCharacter, on: bool)
+signal damaged(character: ArenaCharacter, amount: float)
 
 enum State { SPAWNING, ACTIVE, PUSHING, HITSTUN, FALLING, OUT, VICTORY, FROZEN }
 
@@ -72,6 +73,13 @@ enum State { SPAWNING, ACTIVE, PUSHING, HITSTUN, FALLING, OUT, VICTORY, FROZEN }
 @export var lunge_speed := 4.0
 @export var recoil_speed := 2.2
 
+@export_group("Health")
+## 0 = no health (duels: only falling counts). Survival fighters and enemies have some, and
+## die when it runs out.
+@export var max_hp := 0.0
+## Damage dealt to whoever this character's shove hits.
+@export var push_damage := 10.0
+
 @export_group("Knockback")
 @export var hitstun_time := 0.36
 ## Exponential friction applied to knockback velocity (1/s).
@@ -85,6 +93,7 @@ var camera: PixelCamera
 var fx: FxSprites
 
 var state := State.FROZEN
+var hp := 0.0
 var facing := Vector3.FORWARD
 var _facing_angle := 0.0
 var _state_time := 0.0
@@ -202,6 +211,7 @@ func spawn(at: Vector3, face: Vector3) -> void:
 	_haste = 0.0
 	_slow = 0.0
 	_in_water = false
+	hp = max_hp
 	cast_level = 0.0
 	_set_state(State.SPAWNING)
 	_visual.visible = true
@@ -239,6 +249,28 @@ func knock_out(seconds: float) -> void:
 	_ko = maxf(_ko, seconds)
 	_dash_t = 0.0
 	_squash_vel += 8.0
+
+
+## Loses `amount` health (if this character has any); at 0 it dies on the spot.
+func take_damage(amount: float, _attacker: ArenaCharacter = null) -> void:
+	if max_hp <= 0.0 or amount <= 0.0 or not is_alive() or state == State.SPAWNING:
+		return
+	hp = maxf(hp - amount, 0.0)
+	_flash = 1.0
+	damaged.emit(self, amount)
+	if hp <= 0.0:
+		_die()
+
+
+func _die() -> void:
+	_set_state(State.OUT)
+	velocity = Vector3.ZERO
+	collision_mask = 0
+	_visual.visible = false
+	if fx:
+		fx.vanish(global_position + Vector3.UP * 0.3)
+		fx.dust_ring(global_position + Vector3.UP * 0.05, 8)
+	eliminated.emit(self)
 
 
 ## Moves `mult` times faster (Quicken) for `seconds`.
@@ -613,6 +645,7 @@ func _resolve_push() -> void:
 		to.y = 0.0
 		var dir := (facing * 0.65 + to.normalized() * 0.35).normalized()
 		target.receive_push(dir, push_strength, self)
+		target.take_damage(push_damage, self)
 		velocity.x = -facing.x * recoil_speed
 		velocity.z = -facing.z * recoil_speed
 		_hitstop = hitstop_time
@@ -858,6 +891,7 @@ func _mcp_state() -> Dictionary:
 		"facing_deg": snappedf(rad_to_deg(_facing_angle), 0.1),
 		"cooldown": snappedf(_cooldown, 0.01),
 		"ko": snappedf(_ko, 0.01),
+		"hp": snappedf(hp, 0.1),
 		"haste": snappedf(_haste, 0.01),
 		"slow": snappedf(_slow, 0.01),
 		"in_water": _in_water,

@@ -183,6 +183,7 @@ func _cast_bolt(spell: SpellDefinition, caster: ArenaCharacter, origin: Vector3,
 			bolt.speed = _lv(14.0, 16.0, 18.0)
 			bolt.hit_radius = _lv(0.65, 0.8, 0.95)
 			bolt.strength = _lv(10.0, 15.0, 19.0) * _power
+			bolt.damage = _lv(14.0, 24.0, 38.0) * _power
 		MagicBolt.Kind.SWAP:
 			bolt.radius = 0.13
 			bolt.speed = 24.0
@@ -194,6 +195,7 @@ func _cast_bolt(spell: SpellDefinition, caster: ArenaCharacter, origin: Vector3,
 			bolt.hit_radius = 0.7
 			bolt.max_range = 8.0
 			bolt.stun_time = knockout_beats * _lv(0.5, 1.0, 1.5) * _power * _beat_seconds()
+			bolt.damage = _lv(5.0, 8.0, 12.0) * _power
 		MagicBolt.Kind.SNARE:
 			bolt.radius = 0.3
 			bolt.speed = 7.0
@@ -201,6 +203,7 @@ func _cast_bolt(spell: SpellDefinition, caster: ArenaCharacter, origin: Vector3,
 			bolt.max_range = 8.0
 			bolt.slow_mult = _lv(0.65, 0.5, 0.38)
 			bolt.slow_time = snare_beats * _lv(0.6, 1.0, 1.4) * _power * _beat_seconds()
+			bolt.damage = _lv(5.0, 8.0, 12.0) * _power
 	add_child(bolt)
 	bolt.global_position = origin
 	# Recoil sells the release.
@@ -440,6 +443,7 @@ func _cast_shockwave(spell: SpellDefinition, caster: ArenaCharacter) -> void:
 			continue
 		var out := d / dist if dist > 0.05 else caster.facing
 		e.receive_push(out, force * (1.0 - 0.45 * dist / radius), caster)
+		e.take_damage(_lv(10.0, 18.0, 28.0) * _power * (1.0 - 0.45 * dist / radius), caster)
 		e.velocity.y = 3.0
 		if fx:
 			fx.impact(e.global_position + Vector3.UP * 0.4, out)
@@ -483,6 +487,7 @@ func _physics_process(_delta: float) -> void:
 			var out := d.normalized() if d.length() > 0.05 else Vector2(info.caster.facing.x, info.caster.facing.z)
 			var level: int = clampi(m.level, 1, raise_push.size())
 			c.receive_push(Vector3(out.x, 0.0, out.y), raise_push[level - 1] * info.force, info.caster)
+			c.take_damage(8.0 * level * info.force, info.caster)
 			# Launched upward too: the ground heaves under them.
 			c.velocity.y = 2.5 + 1.5 * level
 			info.pushed[c] = true

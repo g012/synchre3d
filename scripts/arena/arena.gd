@@ -18,6 +18,12 @@ extends Node3D
 ##    hundred grid points it covers.
 ##  * One watertight outer shell (cliff + rocky underside), and an island SDF texture.
 ##
+## Endless mode (`endless`, single-player survival): no island and no edge, flat ground that
+## goes on forever. The grass top, collision chunks and holes are streamed around `focus`
+## (the player): a fixed set of flat ground chunks is moved along, collision chunks are
+## recycled as they leave the window, and holes are generated per world cell from a hash of
+## the cell, so the same place always has the same holes.
+##
 ## So opening or closing a hole costs a texel upload, a node scale and a few hundred height
 ## samples per tick, instead of re-meshing terrain. `ground_sdf()` / `height_at()` mirror the
 ## shader math exactly for gameplay, AI and spell targeting.
@@ -71,6 +77,10 @@ const GAP_SDF := 0.15
 @export var terrain_material: Material
 @export_tool_button("Rebuild") var rebuild_action := rebuild
 
+## Endless field instead of an island (see class doc). Set it, then call rebuild().
+var endless := false
+## Endless mode: world point (x, z) the streamed ground is centred on.
+var focus := Vector2.ZERO
 ## The layout actually built (config scaled / randomized). Read this, not `config`.
 var layout: ArenaConfig
 var layout_seed := 0
@@ -137,6 +147,8 @@ func _queue_rebuild() -> void:
 # ---------------------------------------------------------------- distance field / height
 
 func island_sdf(p: Vector2) -> float:
+	if endless:
+		return -1000.0
 	var r := layout.radius
 	var a := atan2(p.y, p.x)
 	var w := layout.edge_wobble * (0.55 * sin(3.0 * a + _phase[0]) + 0.3 * sin(5.0 * a + _phase[1]) + 0.15 * sin(9.0 * a + _phase[2]))
@@ -473,6 +485,8 @@ func _process(delta: float) -> void:
 func _physics_process(_delta: float) -> void:
 	if Engine.is_editor_hint():
 		return
+	if endless:
+		_stream()
 	# Growing mounds update collision at half the physics rate; the last step always lands.
 	_mound_tick = not _mound_tick
 	if _has_mound_dirty and (_mound_tick or not _any_mound_growing()):
@@ -515,6 +529,9 @@ static func _vnoise(p: Vector3) -> float:
 
 func rebuild() -> void:
 	if not config or not is_inside_tree():
+		return
+	if endless:
+		_rebuild_endless()
 		return
 	var randomized := config.randomize_layout and not Engine.is_editor_hint()
 	layout_seed = randi() if randomized else config.seed
@@ -971,6 +988,9 @@ func _build_collision() -> void:
 ## sample is: NaN (a real gap) where the ground SDF exceeds GAP_SDF, else the mound height.
 ## Only holes and mounds that reach `rect` are evaluated; the island part is cached.
 func _refresh_collision(rect: Rect2) -> void:
+	if endless:
+		_endless_refresh_collision(rect)
+		return
 	if _hm_shapes.is_empty():
 		return
 	var i0 := clampi(floori((rect.position.x - _hm_origin.x) / HM_SPACING), 0, _hm_cells.x)
@@ -1100,6 +1120,15 @@ func _upload_features() -> void:
 
 ## Static island outline distance (R and G), sampled by shaders.
 func _bake_sdf_texture() -> void:
+	if endless:
+		# No outline anywhere: a constant "deep inside" texture (sampling clamps to it).
+		_sdf_image = Image.create_empty(2, 2, false, Image.FORMAT_RGF)
+		_sdf_image.fill(Color(-1000.0, -1000.0, 0.0))
+		sdf_rect = Rect2(-ENDLESS_EXTENT, -ENDLESS_EXTENT, ENDLESS_EXTENT * 2.0, ENDLESS_EXTENT * 2.0)
+		sdf_texture = ImageTexture.create_from_image(_sdf_image)
+		RenderingServer.global_shader_parameter_set("arena_sdf", sdf_texture)
+		RenderingServer.global_shader_parameter_set("arena_sdf_rect", Vector4(sdf_rect.position.x, sdf_rect.position.y, sdf_rect.size.x, sdf_rect.size.y))
+		return
 	var ext := layout.radius + Vector2(layout.edge_wobble + 1.0, layout.edge_wobble + 1.0)
 	var res := 6.0 # texels per unit
 	var w := int(ext.x * 2.0 * res)
@@ -1114,3 +1143,251 @@ func _bake_sdf_texture() -> void:
 	sdf_texture = ImageTexture.create_from_image(_sdf_image)
 	RenderingServer.global_shader_parameter_set("arena_sdf", sdf_texture)
 	RenderingServer.global_shader_parameter_set("arena_sdf_rect", Vector4(sdf_rect.position.x, sdf_rect.position.y, sdf_rect.size.x, sdf_rect.size.y))
+
+
+# ---------------------------------------------------------------- endless field
+
+## Half-size of the (virtual) endless layout, for code that reads `layout.radius`.
+const ENDLESS_EXTENT := 10000.0
+## Flat ground chunks: size (world units) and how many per side around the focus.
+const GROUND_CHUNK := 10.0
+const GROUND_WINDOW := 5
+## Collision chunks kept around the focus, per side (each HM_CHUNK * HM_SPACING = 3.2 units).
+const COLLISION_WINDOW := 12
+## Hole cells: size, and how many cells around the focus have their holes.
+const HOLE_CELL := 7.0
+const HOLE_RANGE := 2
+## No holes this close to where a run starts.
+const SAFE_START := 4.0
+## Spell holes and mounds this far from the focus are dropped.
+const FORGET_DISTANCE := 40.0
+
+var _ground_chunks: Array[MeshInstance3D] = []
+# Collision chunk (absolute chunk coords) -> { body, shape }, and recycled ones.
+var _ecol := {}
+var _ecol_pool: Array[Dictionary] = []
+# Hole cells currently populated (Vector2i -> true), and holes waiting to be added.
+var _hole_cells := {}
+var _hole_queue: Array[Array] = []
+
+
+func _rebuild_endless() -> void:
+	layout_seed = randi()
+	_rng.seed = layout_seed
+	layout = config.duplicate(true) as ArenaConfig
+	layout.radius = Vector2(ENDLESS_EXTENT, ENDLESS_EXTENT)
+	for list in [layout.holes, layout.ponds, layout.trees, layout.bushes, layout.rocks, layout.stumps,
+			layout.mushrooms, layout.dancing_flowers]:
+		list.clear()
+	layout.spawn_points.assign([Vector2(-1.2, 0.0), Vector2(1.2, 0.0)])
+	_phase.resize(8)
+	_phase.fill(0.0)
+	print("Endless field seed: %d" % layout_seed)
+	for c in get_children():
+		if c.has_meta("generated"):
+			remove_child(c)
+			c.queue_free()
+	if not has_node("Water"):
+		var water := Water.new()
+		water.name = "Water"
+		add_child(water)
+	holes.clear()
+	mounds.clear()
+	ponds.clear()
+	_walls.clear()
+	_ground_chunks.clear()
+	_ecol.clear()
+	_ecol_pool.clear()
+	_hole_cells.clear()
+	_hole_queue.clear()
+	_init_features()
+	_bake_sdf_texture()
+	# One flat grid mesh, shared by every ground chunk (UV2 = (1, 1): grass top, follows mounds).
+	var plane := PlaneMesh.new()
+	plane.size = Vector2.ONE * GROUND_CHUNK
+	plane.subdivide_width = int(GROUND_CHUNK / layout.cell_size) - 1
+	plane.subdivide_depth = plane.subdivide_width
+	var arrays := plane.surface_get_arrays(0)
+	var uv2 := PackedVector2Array()
+	uv2.resize((arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size())
+	uv2.fill(Vector2.ONE)
+	arrays[Mesh.ARRAY_TEX_UV2] = uv2
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	mesh.surface_set_material(0, terrain_material)
+	# Tall enough for mountains lifted in the vertex shader.
+	mesh.custom_aabb = AABB(Vector3(-GROUND_CHUNK * 0.5, -1.0, -GROUND_CHUNK * 0.5), Vector3(GROUND_CHUNK, MOUND_LEVELS[-1].y + 2.0, GROUND_CHUNK))
+	for k in GROUND_WINDOW * GROUND_WINDOW:
+		var mi := MeshInstance3D.new()
+		mi.name = "Ground%d" % k
+		mi.mesh = mesh
+		_add_generated(mi)
+		_ground_chunks.append(mi)
+	_upload_features()
+	obstacles.clear()
+	decor_footprints.clear()
+	_stream()
+	for c in get_children():
+		if c.has_method("rebuild_from_arena"):
+			c.rebuild_from_arena(self)
+	rebuilt.emit()
+
+
+## Moves the ground chunks along, streams collision chunks and hole cells around `focus`.
+func _stream() -> void:
+	var gc := Vector2i(floori(focus.x / GROUND_CHUNK), floori(focus.y / GROUND_CHUNK))
+	var half := GROUND_WINDOW / 2
+	for k in _ground_chunks.size():
+		var c := gc + Vector2i(k % GROUND_WINDOW - half, k / GROUND_WINDOW - half)
+		_ground_chunks[k].position = Vector3((c.x + 0.5) * GROUND_CHUNK, 0.0, (c.y + 0.5) * GROUND_CHUNK)
+	_stream_holes()
+	_stream_collision()
+
+
+func _stream_holes() -> void:
+	var fc := Vector2i(floori(focus.x / HOLE_CELL), floori(focus.y / HOLE_CELL))
+	var needed := {}
+	for dj in range(-HOLE_RANGE, HOLE_RANGE + 1):
+		for di in range(-HOLE_RANGE, HOLE_RANGE + 1):
+			needed[fc + Vector2i(di, dj)] = true
+	# Cells leaving the window take their holes along; far spell holes and mounds go too.
+	var gone := false
+	for c in _hole_cells.keys():
+		if not needed.has(c):
+			_hole_cells.erase(c)
+	for i in range(holes.size() - 1, -1, -1):
+		var h := holes[i]
+		var far: bool = h.has("cell") and not needed.has(h.cell)
+		far = far or (h.dynamic and (h.center as Vector2).distance_to(focus) > FORGET_DISTANCE)
+		if far:
+			_free_wall(h.id)
+			holes.remove_at(i)
+			gone = true
+	for i in range(mounds.size() - 1, -1, -1):
+		if (mounds[i].center as Vector2).distance_to(focus) > FORGET_DISTANCE:
+			mounds.remove_at(i)
+			gone = true
+	if gone:
+		_features_dirty = true
+	_hole_queue = _hole_queue.filter(func(q: Array) -> bool: return needed.has(q[0]))
+	for c in needed:
+		if not _hole_cells.has(c):
+			_hole_cells[c] = true
+			for spec in _cell_holes(c):
+				_hole_queue.append([c, spec])
+	# A few walls per tick (each is a small mesh build).
+	for n in 3:
+		if _hole_queue.is_empty() or holes.size() >= MAX_HOLES - 8:
+			break
+		var q: Array = _hole_queue.pop_front()
+		var spec: Vector3 = q[1]
+		var h := _add_hole(Vector2(spec.x, spec.y), spec.z, 1.0, false, _rng.randf() * TAU, _rng.randf() * TAU)
+		h.cell = q[0]
+
+
+## Holes of world cell `c` (x, z, radius): 0-2, placed from a hash of the cell so they are
+## the same every time the cell comes back into range.
+func _cell_holes(c: Vector2i) -> Array[Vector3]:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(Vector3i(c.x, c.y, layout_seed))
+	var roll := rng.randf()
+	var n := 0 if roll < 0.25 else (1 if roll < 0.8 else 2)
+	var out: Array[Vector3] = []
+	for k in n * 4:
+		if out.size() >= n:
+			break
+		var r := rng.randf_range(0.55, 1.3)
+		var m := r + 0.8
+		var p := Vector2(c) * HOLE_CELL + Vector2(rng.randf_range(m, HOLE_CELL - m), rng.randf_range(m, HOLE_CELL - m))
+		if p.length() < SAFE_START + r:
+			continue
+		var ok := true
+		for o in out:
+			if p.distance_to(Vector2(o.x, o.y)) < r + o.z + 1.2:
+				ok = false
+		if ok:
+			out.append(Vector3(p.x, p.y, r))
+	return out
+
+
+func _stream_collision() -> void:
+	var cw := HM_CHUNK * HM_SPACING
+	var fc := Vector2i(floori(focus.x / cw), floori(focus.y / cw))
+	var half := COLLISION_WINDOW / 2
+	var needed := {}
+	for dj in range(-half, half):
+		for di in range(-half, half):
+			needed[fc + Vector2i(di, dj)] = true
+	for c in _ecol.keys():
+		if not needed.has(c):
+			_ecol_pool.append(_ecol[c])
+			_ecol.erase(c)
+	for c in needed:
+		if _ecol.has(c):
+			continue
+		var e: Dictionary = _ecol_pool.pop_back() if not _ecol_pool.is_empty() else _new_collision_chunk()
+		var body: StaticBody3D = e.body
+		body.position = Vector3((c.x * HM_CHUNK + HM_CHUNK / 2) * HM_SPACING, 0.0, (c.y * HM_CHUNK + HM_CHUNK / 2) * HM_SPACING)
+		_ecol[c] = e
+		_fill_collision_chunk(c, e)
+
+
+func _new_collision_chunk() -> Dictionary:
+	var body := StaticBody3D.new()
+	body.collision_layer = LAYER_FLOOR
+	body.collision_mask = 0
+	var shape := HeightMapShape3D.new()
+	shape.map_width = HM_CHUNK + 1
+	shape.map_depth = HM_CHUNK + 1
+	var cs := CollisionShape3D.new()
+	cs.shape = shape
+	cs.scale = Vector3.ONE * HM_SPACING
+	body.add_child(cs)
+	_add_generated(body)
+	var data := PackedFloat32Array()
+	data.resize((HM_CHUNK + 1) * (HM_CHUNK + 1))
+	return {"body": body, "shape": shape, "data": data}
+
+
+## Heights of one collision chunk: NaN over holes, else the ground height (mounds; no
+## ponds in the endless field). Only holes and mounds reaching the chunk are evaluated.
+func _fill_collision_chunk(c: Vector2i, e: Dictionary) -> void:
+	var o := Vector2(c * HM_CHUNK) * HM_SPACING
+	var rect := Rect2(o, Vector2.ONE * HM_CHUNK * HM_SPACING)
+	var near_holes: Array[Dictionary] = []
+	for h in holes:
+		if h.scale > 0.02 and rect.grow((h.radius + layout.hole_wobble) * h.scale + GAP_SDF).has_point(h.center):
+			near_holes.append(h)
+	var near_mounds: Array[Dictionary] = []
+	for m in mounds:
+		if m.height > 0.0 and rect.grow(m.radius * 1.17).has_point(m.center):
+			near_mounds.append(m)
+	var data: PackedFloat32Array = e.data
+	var inv := 1.0 / HM_SPACING
+	var n := HM_CHUNK + 1
+	for j in n:
+		for i in n:
+			var p := o + Vector2(i, j) * HM_SPACING
+			var d := -1000.0
+			for h in near_holes:
+				d = maxf(d, -hole_sdf(p, h))
+			var v := NAN
+			if d <= GAP_SDF:
+				var best := 0.0
+				for m in near_mounds:
+					best = maxf(best, _mound_value(p, m))
+				v = best * inv
+			data[j * n + i] = v
+	e.data = data
+	(e.shape as HeightMapShape3D).map_data = data
+
+
+func _endless_refresh_collision(rect: Rect2) -> void:
+	var cw := HM_CHUNK * HM_SPACING
+	var c0 := Vector2i(floori(rect.position.x / cw), floori(rect.position.y / cw))
+	var c1 := Vector2i(floori(rect.end.x / cw), floori(rect.end.y / cw))
+	for cj in range(c0.y, c1.y + 1):
+		for ci in range(c0.x, c1.x + 1):
+			var c := Vector2i(ci, cj)
+			if _ecol.has(c):
+				_fill_collision_chunk(c, _ecol[c])

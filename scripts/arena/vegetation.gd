@@ -4,6 +4,10 @@ extends Node3D
 ## Scatters grass tufts and flowers over the arena as one MultiMesh, in dense clumps
 ## separated by open lawn, always keeping clear of hole edges and prop footprints.
 ## Regenerates whenever the parent Arena rebuilds.
+##
+## Endless field: grass comes in square chunks generated around the arena's focus (one new
+## chunk per frame) and dropped behind; the grass shader itself hides tufts over holes, so
+## chunks don't depend on the (streamed) holes.
 
 @export var grass_material: ShaderMaterial
 ## Footprints (x, z, radius) where no grass grows (props and decorations).
@@ -11,6 +15,14 @@ var blocked: Array[Vector3] = []
 
 var _arena: Arena
 var _wind_time := 0.0
+
+## Endless field: grass chunk size and how many around the focus, per side.
+const CHUNK := 6.0
+const WINDOW := 6
+var _chunks := {}
+var _clumps: FastNoiseLite
+var _flowers_noise: FastNoiseLite
+var _quad: QuadMesh
 
 
 ## Called by the Arena after the terrain (and Props) are built.
@@ -28,6 +40,10 @@ func rebuild() -> void:
 	for c in get_children():
 		remove_child(c)
 		c.queue_free()
+	_chunks.clear()
+	if _arena.endless:
+		_start_endless()
+		return
 	var cfg := _arena.layout
 	var rng := RandomNumberGenerator.new()
 	rng.seed = cfg.seed * 31 + 5
@@ -123,3 +139,88 @@ func _is_blocked(p: Vector2) -> bool:
 func _process(delta: float) -> void:
 	_wind_time += delta
 	RenderingServer.global_shader_parameter_set("wind_time", _wind_time)
+	if _arena and _arena.endless and not Engine.is_editor_hint():
+		_stream()
+
+
+func _start_endless() -> void:
+	var cfg := _arena.layout
+	_clumps = FastNoiseLite.new()
+	_clumps.seed = _arena.layout_seed
+	_clumps.frequency = 0.32
+	_clumps.fractal_octaves = 2
+	_flowers_noise = FastNoiseLite.new()
+	_flowers_noise.seed = _arena.layout_seed + 99
+	_flowers_noise.frequency = 0.9
+	_quad = QuadMesh.new()
+	_quad.size = Vector2.ONE
+	_quad.center_offset = Vector3(0.0, 0.5, 0.0)
+	# No baked density map: soil under clumps is not darkened in the endless field.
+	var img := Image.create_empty(1, 1, false, Image.FORMAT_R8)
+	RenderingServer.global_shader_parameter_set("grass_density_map", ImageTexture.create_from_image(img))
+	for k in WINDOW * WINDOW:
+		_stream()
+
+
+## Drops chunks out of range, then generates the nearest missing one.
+func _stream() -> void:
+	var f := _arena.focus
+	var fc := Vector2i(floori(f.x / CHUNK), floori(f.y / CHUNK))
+	var half := WINDOW / 2
+	for c in _chunks.keys():
+		if absi(c.x - fc.x) > half or absi(c.y - fc.y) > half:
+			_chunks[c].queue_free()
+			_chunks.erase(c)
+	var best := Vector2i.ZERO
+	var best_d := INF
+	for dj in range(-half, half + 1):
+		for di in range(-half, half + 1):
+			var c := fc + Vector2i(di, dj)
+			if not _chunks.has(c) and Vector2(di, dj).length() < best_d:
+				best_d = Vector2(di, dj).length()
+				best = c
+	if best_d < INF:
+		_chunks[best] = _build_chunk(best)
+
+
+func _build_chunk(c: Vector2i) -> MultiMeshInstance3D:
+	var cfg := _arena.layout
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(Vector3i(c.x, c.y, _arena.layout_seed))
+	var o := Vector2(c) * CHUNK
+	var step := 1.0 / sqrt(cfg.grass_density)
+	var transforms: Array[Transform3D] = []
+	var customs: Array[Color] = []
+	var z := 0.0
+	while z < CHUNK:
+		var x := 0.0
+		while x < CHUNK:
+			var p := o + Vector2(x + rng.randf_range(-0.5, 0.5) * step, z + rng.randf_range(-0.5, 0.5) * step)
+			x += step
+			if rng.randf() > smoothstep(-0.05, 0.25, _clumps.get_noise_2d(p.x, p.y)):
+				continue
+			var custom: Color
+			if _flowers_noise.get_noise_2d(p.x, p.y) > 0.45 and rng.randf() < cfg.flower_density * 0.35:
+				var palette: Array[int] = [28, 29, 30, 31]
+				var col := palette[int(abs(_flowers_noise.get_noise_2d(p.x * 0.3, p.y * 0.3 + 40.0)) * 8.0) % 4]
+				custom = Color(col / 32.0, rng.randi_range(6, 7) / 8.0, rng.randf(), 0.0)
+			else:
+				custom = Color(0.0, rng.randi_range(0, 5) / 8.0, rng.randf(), 0.0)
+			transforms.append(Transform3D(Basis.IDENTITY, Vector3(p.x, 0.0, p.y)))
+			customs.append(custom)
+		z += step
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.use_custom_data = true
+	mm.mesh = _quad
+	mm.instance_count = transforms.size()
+	for i in transforms.size():
+		mm.set_instance_transform(i, transforms[i])
+		mm.set_instance_custom_data(i, customs[i])
+	var mmi := MultiMeshInstance3D.new()
+	mmi.multimesh = mm
+	mmi.material_override = grass_material
+	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mmi.custom_aabb = AABB(Vector3(o.x - 1.0, -1.0, o.y - 1.0), Vector3(CHUNK + 2.0, Arena.MOUND_LEVELS[-1].y + 3.0, CHUNK + 2.0))
+	add_child(mmi)
+	return mmi

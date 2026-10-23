@@ -50,6 +50,8 @@ func update(c: ArenaCharacter, delta: float) -> void:
 	_want_push = false
 	_update_chant(c, delta)
 	var target := c.opponent
+	if not target or not target.is_alive():
+		target = _nearest_enemy(c)
 	if not target or not target.is_alive() or not c.is_controllable():
 		_move = Vector3.ZERO
 		_push_countdown = -1.0
@@ -213,6 +215,18 @@ static func _aimed(s: SpellDefinition) -> bool:
 	return s.effect in [SpellDefinition.Effect.PUSH, SpellDefinition.Effect.CREATE_HOLE,
 		SpellDefinition.Effect.CLOSE_HOLE, SpellDefinition.Effect.SWAP_BALL, SpellDefinition.Effect.KNOCKOUT,
 		SpellDefinition.Effect.SNARE_BALL]
+
+
+## The closest enemy (survival: minions have no single opponent), or null.
+func _nearest_enemy(c: ArenaCharacter) -> ArenaCharacter:
+	var best: ArenaCharacter = null
+	var best_d := INF
+	for e in c.enemies():
+		var d := e.global_position.distance_squared_to(c.global_position)
+		if d < best_d:
+			best_d = d
+			best = e
+	return best
 
 
 ## 0 when well inside the ground, rising to 1 at the edge and beyond.
