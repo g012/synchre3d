@@ -46,6 +46,10 @@ enum State { SPAWNING, ACTIVE, PUSHING, HITSTUN, FALLING, OUT, VICTORY, FROZEN }
 ## Fraction of ground acceleration available in the air.
 @export var air_control := 0.7
 
+@export_group("Water")
+## Speed multiplier while wading through pond water.
+@export var wade_speed := 0.72
+
 @export_group("Dash")
 ## Horizontal speed of a dash (move_speed is 5), held for `dash_time`, then braked normally.
 @export var dash_speed := 13.0
@@ -116,6 +120,14 @@ var _air_dash_used := false
 ## Seconds left knocked out: no control, still pushable.
 var _ko := 0.0
 var _ko_fx := 0.0
+# Timed speed changes (Quicken / Snare spells): seconds left and multiplier.
+var _haste := 0.0
+var _haste_mult := 1.0
+var _slow := 0.0
+var _slow_mult := 1.0
+var _status_fx := 0.0
+var _in_water := false
+var _splash := 0.0
 ## Aimed spells turn the caster toward the nearest enemy (toggled with LT).
 var auto_aim := true:
 	set(value):
@@ -187,6 +199,9 @@ func spawn(at: Vector3, face: Vector3) -> void:
 	_dash_cd = 0.0
 	_air_dash_used = false
 	_ko = 0.0
+	_haste = 0.0
+	_slow = 0.0
+	_in_water = false
 	cast_level = 0.0
 	_set_state(State.SPAWNING)
 	_visual.visible = true
@@ -226,6 +241,33 @@ func knock_out(seconds: float) -> void:
 	_squash_vel += 8.0
 
 
+## Moves `mult` times faster (Quicken) for `seconds`.
+func haste(mult: float, seconds: float) -> void:
+	_haste_mult = mult
+	_haste = maxf(_haste, seconds)
+
+
+## Moves `mult` times as fast (Snare, < 1) for `seconds`.
+func slow_down(mult: float, seconds: float) -> void:
+	if not is_alive():
+		return
+	_slow_mult = mult
+	_slow = maxf(_slow, seconds)
+	_squash_vel += 5.0
+
+
+## Current top-speed multiplier: spells and wading.
+func speed_factor() -> float:
+	var k := 1.0
+	if _haste > 0.0:
+		k *= _haste_mult
+	if _slow > 0.0:
+		k *= _slow_mult
+	if _in_water:
+		k *= wade_speed
+	return k
+
+
 ## Alive characters of other teams (fighters and minions).
 func enemies() -> Array[ArenaCharacter]:
 	var out: Array[ArenaCharacter] = []
@@ -252,6 +294,8 @@ func _physics_process(delta: float) -> void:
 	_jump_buffer = maxf(_jump_buffer - delta, 0.0)
 	_dash_cd = maxf(_dash_cd - delta, 0.0)
 	_ko = maxf(_ko - delta, 0.0)
+	_haste = maxf(_haste - delta, 0.0)
+	_slow = maxf(_slow - delta, 0.0)
 	if brain:
 		brain.update(self, delta)
 		if brain.wants_jump(self) and _ko <= 0.0:
@@ -327,7 +371,7 @@ func _update_move(delta: float, control: float) -> void:
 	wish.y = 0.0
 	if wish.length() > 1.0:
 		wish = wish.normalized()
-	var target := Vector2(wish.x, wish.z) * move_speed
+	var target := Vector2(wish.x, wish.z) * move_speed * speed_factor()
 	var cur := Vector2(velocity.x, velocity.z)
 	var rate := (acceleration if target.length_squared() > 0.0001 else deceleration) * control
 	# Faster response when reversing direction keeps the controls snappy.
@@ -372,11 +416,49 @@ func _apply_gravity_and_move(delta: float) -> void:
 	var airborne := not is_on_floor()
 	if not airborne:
 		_air_dash_used = false
+	_update_water(delta, airborne)
 	if _was_airborne and not airborne:
 		_squash_vel += 6.0
 		if fx:
 			fx.dust_ring(global_position + Vector3.UP * 0.05, 4)
 	_was_airborne = airborne
+
+
+## Wading: splash on entering pond water, spray while moving through it.
+func _update_water(delta: float, airborne: bool) -> void:
+	var wet := not airborne and arena.water_depth(_xz()) > 0.02
+	if wet and not _in_water and fx:
+		for k in 8:
+			var a := TAU * k / 8.0
+			fx.spawn(global_position + Vector3(cos(a) * 0.2, 0.05, sin(a) * 0.2), Vector3(cos(a) * 1.2, randf_range(1.5, 2.6), sin(a) * 1.2),
+				0.4, FxSprites.TILE_SPARK, 15 if k % 2 == 0 else 1, 3, 3.0, 1.0, 9.0, 0.5)
+	_in_water = wet
+	if not wet or not fx:
+		return
+	_splash -= delta
+	var speed := Vector2(velocity.x, velocity.z).length()
+	if speed > 1.0 and _splash <= 0.0:
+		_splash = 0.09
+		var side := Vector3(-facing.z, 0.0, facing.x) * randf_range(-0.2, 0.2)
+		fx.spawn(global_position + side + Vector3.UP * 0.02, Vector3(side.x * 3.0, randf_range(1.0, 2.0), side.z * 3.0) - facing * 0.4,
+			0.35, FxSprites.TILE_SPARK, 1 if randf() < 0.5 else 15, 3, 2.0, 1.0, 9.0, 0.5)
+
+
+## Sparks trailing a hasted character, drips falling off a snared one.
+func _status_trail(delta: float) -> void:
+	if not fx or (_haste <= 0.0 and _slow <= 0.0) or not is_alive():
+		return
+	_status_fx -= delta
+	if _status_fx > 0.0:
+		return
+	_status_fx = 0.06 if _haste > 0.0 else 0.14
+	if _haste > 0.0 and Vector2(velocity.x, velocity.z).length() > 1.0:
+		fx.spawn(global_position + Vector3.UP * randf_range(0.15, 0.6) - facing * 0.25, -facing * 1.5, 0.25,
+			FxSprites.TILE_SPARK, 22, 2, 3.0, 1.0, 0.0, 3.0)
+	if _slow > 0.0:
+		var a := randf() * TAU
+		fx.spawn(global_position + Vector3(cos(a) * 0.25, randf_range(0.5, 0.9) * model_scale, sin(a) * 0.25), Vector3.DOWN * 0.3,
+			0.5, FxSprites.TILE_PUFF, 31, 2, 4.0, 2.0, 3.0, 1.0)
 
 
 ## Dashes along the stick (or the facing direction without input) if the cooldown allows.
@@ -619,6 +701,7 @@ func _process(delta: float) -> void:
 
 	_animate_parts(delta)
 	_emit_dust(delta)
+	_status_trail(delta)
 
 
 func _animate_parts(delta: float) -> void:
@@ -754,7 +837,7 @@ func _pose(part: String, offset: Vector3, rot: Vector3, scl: Vector3, delta: flo
 
 
 func _emit_dust(delta: float) -> void:
-	if not fx or state != State.ACTIVE:
+	if not fx or state != State.ACTIVE or _in_water:
 		return
 	var speed := Vector2(velocity.x, velocity.z).length()
 	if speed < 2.5:
@@ -775,6 +858,10 @@ func _mcp_state() -> Dictionary:
 		"facing_deg": snappedf(rad_to_deg(_facing_angle), 0.1),
 		"cooldown": snappedf(_cooldown, 0.01),
 		"ko": snappedf(_ko, 0.01),
+		"haste": snappedf(_haste, 0.01),
+		"slow": snappedf(_slow, 0.01),
+		"in_water": _in_water,
+		"speed_factor": snappedf(speed_factor(), 0.01),
 		"squash": snappedf(_squash, 0.01),
 		"ground_sdf": snappedf(arena.ground_sdf(Vector2(global_position.x, global_position.z)), 0.01) if arena else 0.0,
 	}

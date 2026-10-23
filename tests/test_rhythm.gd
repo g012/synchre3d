@@ -571,7 +571,7 @@ func test_matches_original_frame_sampled_algorithm() -> void:
 func test_spellbook() -> void:
 	var book: SpellBook = load("res://assets/spells/spellbook.tres")
 	check(book != null and book.active().size() >= 3, "spellbook: at least 3 spells in play (%d)" % book.active().size())
-	check(book.spells.size() == 9, "spellbook keeps 9 spells including ideas (%d)" % book.spells.size())
+	check(book.spells.size() == 11, "spellbook keeps 11 spells including ideas (%d)" % book.spells.size())
 	var push: SpellDefinition = book.find(&"push")
 	check(push.button_string(1) == "A A Y" and push.button_string(2) == "A A B X Y" and push.button_string(3) == "A A B X B X Y",
 		"push levels: start + end, then the middle once, twice (%s / %s / %s)" % [push.button_string(1), push.button_string(2), push.button_string(3)])

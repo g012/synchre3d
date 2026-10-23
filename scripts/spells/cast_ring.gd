@@ -31,7 +31,8 @@ func _process(_delta: float) -> void:
 	if not visible:
 		return
 	var p := c.get_global_transform_interpolated().origin
-	global_position = Vector3(p.x, arena.height_at(Vector2(p.x, p.z)) + 0.06, p.z)
+	# On the ground, or on the water surface when wading.
+	global_position = Vector3(p.x, maxf(arena.height_at(Vector2(p.x, p.z)), Arena.WATER_LEVEL) + 0.06, p.z)
 	var chanted := caster.chanted()
 	var slots := caster.chant_length()
 	if chanted != _shown or slots != _slots:

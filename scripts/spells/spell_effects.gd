@@ -46,6 +46,11 @@ const SOUNDS := {
 @export var shockwave_push := 14.0
 ## Knockout: beats the target stays down.
 @export var knockout_beats := 4.0
+## Quicken: speed multiplier on the caster (level 2) and how many beats it lasts.
+@export var quicken_mult := 1.45
+@export var quicken_beats := 8.0
+## Snare: beats the target stays slowed (level 2).
+@export var snare_beats := 6.0
 
 var arena: Arena
 var fx: FxSprites
@@ -118,12 +123,16 @@ func cast(spell: SpellDefinition, caster: ArenaCharacter, origin: Vector3, level
 			_cast_bolt(spell, caster, origin, MagicBolt.Kind.SWAP)
 		SpellDefinition.Effect.KNOCKOUT:
 			_cast_bolt(spell, caster, origin, MagicBolt.Kind.KNOCKOUT)
+		SpellDefinition.Effect.SNARE_BALL:
+			_cast_bolt(spell, caster, origin, MagicBolt.Kind.SNARE)
+		SpellDefinition.Effect.QUICKEN:
+			_cast_quicken(spell, caster)
 
 
 const AIMED: Array[SpellDefinition.Effect] = [SpellDefinition.Effect.PUSH,
 	SpellDefinition.Effect.CREATE_HOLE, SpellDefinition.Effect.CLOSE_HOLE,
 	SpellDefinition.Effect.RAISE_MINION, SpellDefinition.Effect.SWAP_BALL,
-	SpellDefinition.Effect.KNOCKOUT]
+	SpellDefinition.Effect.KNOCKOUT, SpellDefinition.Effect.SNARE_BALL]
 ## Auto-aim only locks onto enemies this close.
 const AIM_RANGE := 14.0
 
@@ -185,6 +194,13 @@ func _cast_bolt(spell: SpellDefinition, caster: ArenaCharacter, origin: Vector3,
 			bolt.hit_radius = 0.7
 			bolt.max_range = 8.0
 			bolt.stun_time = knockout_beats * _lv(0.5, 1.0, 1.5) * _power * _beat_seconds()
+		MagicBolt.Kind.SNARE:
+			bolt.radius = 0.3
+			bolt.speed = 7.0
+			bolt.hit_radius = 0.75
+			bolt.max_range = 8.0
+			bolt.slow_mult = _lv(0.65, 0.5, 0.38)
+			bolt.slow_time = snare_beats * _lv(0.6, 1.0, 1.4) * _power * _beat_seconds()
 	add_child(bolt)
 	bolt.global_position = origin
 	# Recoil sells the release.
@@ -192,6 +208,21 @@ func _cast_bolt(spell: SpellDefinition, caster: ArenaCharacter, origin: Vector3,
 	if camera:
 		camera.shake(0.1 if kind == MagicBolt.Kind.PUSH else 0.05)
 	_sound("push", 1.0 if kind == MagicBolt.Kind.PUSH else 1.5)
+	resolved.emit(caster, spell, true, "")
+
+
+## Quicken: the caster runs faster for a while.
+func _cast_quicken(spell: SpellDefinition, caster: ArenaCharacter) -> void:
+	var mult := 1.0 + (quicken_mult - 1.0) * _lv(0.6, 1.0, 1.4) * _power
+	caster.haste(mult, quicken_beats * _lv(0.5, 1.0, 1.5) * _power * _beat_seconds())
+	caster.cast_pulse()
+	if fx:
+		fx.dust_ring(caster.global_position + Vector3.UP * 0.05, 10)
+		for k in 10:
+			var a := TAU * k / 10.0
+			fx.spawn(caster.global_position + Vector3.UP * 0.3, Vector3(cos(a), 1.2, sin(a)) * 2.0, 0.35,
+				FxSprites.TILE_SPARK, spell.palette_index, 2, 3.0, 1.0, 0.0, 3.0)
+	_sound("raise", 1.5)
 	resolved.emit(caster, spell, true, "")
 
 

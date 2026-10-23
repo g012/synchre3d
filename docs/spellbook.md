@@ -41,10 +41,14 @@ Rhythms below are the gaps in beats before each note (the first note's lead-in i
 
 ## Time: Y B … Y (B ½ after Y, Y 1 beat after the last note)
 
+Tempo and speed: the shared tempo, or how fast fighters move.
+
 | Spell | Middle | Level 1 / 2 / 3 chant | Effect by level |
 |---|---|---|---|
 | **Hasten** | A X (½, ½) | Y B Y / Y B A X Y / Y B A X A X Y | The shared tempo slides up +10 / +20 / +30 BPM (max 160) over one bar, so a chant almost finished still lands. The new tempo carries over to the next rounds. |
 | Slow | B B (1, 1) | – / Y B B B Y / Y B B B B B Y | The shared tempo slides down −10 / −20 / −30 BPM (min 80) over one bar. |
+| Quicken | X X (½, ½) | – / Y B X X Y / Y B X X X X Y | The caster runs faster: ×1.27 / ×1.45 / ×1.63 for 4 / 8 / 12 beats. Green sparks trail behind. |
+| Snare | X B (1, 1) | – / Y B X B Y / Y B X B X B Y | A slow, heavy blob (7 u/s): whoever it hits moves at 65% / 50% / 38% speed for about 3.6 / 6 / 8.4 beats, dripping blue. |
 
 ## Hex: B X … A (X ½ after B, A 1 beat after the last note)
 

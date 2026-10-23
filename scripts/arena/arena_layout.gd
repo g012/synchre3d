@@ -28,6 +28,7 @@ static func populate(cfg: ArenaConfig, base: ArenaConfig, rng: RandomNumberGener
 	var k := base.size_scale
 	if not randomized:
 		cfg.holes = _scaled(base.holes, k, false)
+		cfg.ponds = _scaled(base.ponds, k, false)
 		cfg.trees = _scaled(base.trees, k, true)
 		cfg.bushes = _scaled(base.bushes, k, true)
 		cfg.rocks = _scaled(base.rocks, k, true)
@@ -75,8 +76,50 @@ static func populate(cfg: ArenaConfig, base: ArenaConfig, rng: RandomNumberGener
 			holes.append(Vector3(p.x, p.y, hr))
 	cfg.holes = holes
 
+	# Ponds: the first one straddles the front edge (the one facing the camera) so it spills
+	# down the cliff; the others sit against a hole and pour into it.
+	var ponds: Array[Vector3] = []
+	var want_ponds := rng.randi_range(base.pond_count.x, base.pond_count.y)
+	for attempt in 400:
+		if ponds.size() >= want_ponds:
+			break
+		var pr := rng.randf_range(base.pond_radius.x, base.pond_radius.y)
+		var p := Vector2.ZERO
+		if ponds.is_empty():
+			var a := rng.randf_range(0.25, 0.75) * PI # front half (+z)
+			p = Vector2(cos(a) * r.x, sin(a) * r.y)
+			# Walk inward until the rim crosses the edge by a bit.
+			for step in 60:
+				if island_sdf.call(p) < -pr * 0.55:
+					break
+				p *= 0.97
+		else:
+			if holes.is_empty():
+				break
+			var h := holes[rng.randi() % holes.size()]
+			var a := rng.randf() * TAU
+			p = Vector2(h.x, h.y) + Vector2(cos(a), sin(a)) * (h.z + pr * 0.55)
+			if island_sdf.call(p) > -(pr + 1.0):
+				continue
+		var ok := true
+		for s in spawns:
+			if p.distance_to(s) < pr + 1.8:
+				ok = false
+		for q in ponds:
+			if p.distance_to(Vector2(q.x, q.y)) < pr + q.z + 1.0:
+				ok = false
+		for h in holes:
+			# Pond against a hole: overlapping its rim is the point, swallowing it is not.
+			if p.distance_to(Vector2(h.x, h.y)) < h.z + pr * 0.35:
+				ok = false
+		if ok:
+			ponds.append(Vector3(p.x, p.y, pr))
+	cfg.ponds = ponds
+
 	# Props: solid ones first (bigger clearance), then decorations.
 	var placed: Array[Vector3] = [] # x, z, clearance radius
+	for q in ponds:
+		placed.append(Vector3(q.x, q.y, q.z * 1.05))
 	# Trees ring the island edge (the camera follows the fighters, so a tree in the middle
 	# would keep hiding them), denser along the back where the canopy frames the view.
 	cfg.trees = _scatter(rng, base.tree_count, Vector2(0.85, 1.15), 1.1, cfg, island_sdf, holes, spawns, placed,

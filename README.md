@@ -72,7 +72,7 @@ console). The camera follows both fighters and zooms out a little when they are 
    |---|---|---|
    | Force | A A … Y | **Push** (B X), Shockwave (X X) |
    | Earth | X Y … X | **Open Pit** (Y Y), Mend Earth (B A) |
-   | Time | Y B … Y | **Hasten** (A X), Slow (B B) |
+   | Time | Y B … Y | **Hasten** (A X), Slow (B B), Quicken (X X), Snare (X B) |
    | Hex | B X … A | **Knockout** (Y), Swap (X X), Minion (B Y) |
 
    The first spell of each family (in bold) also has level 1: Push level 1 is just
@@ -119,6 +119,24 @@ spirit of Super Mario Bros. Wonder: a squash on every beat, swaying to alternate
 the head counter-tilting, leaves waving, petals pulsing, and a hop with squinted eyes on
 each bar's downbeat. Before the tempo is set they just sway. The small flowers in the grass
 bop on the beat too.
+
+**Ponds:** each island has one or two small ponds you can wade through: shallow water
+(about 0.3 deep) in a bowl dug into the lawn, with a sandy shore. Wading slows you to 72%,
+throws up spray as you move and leaves ripple rings around you; your legs disappear under
+the surface. Where a pond meets the island's edge it spills over as a waterfall that falls
+into the sky and breaks up into mist; where it meets a hole (layout holes, or one opened by
+Open Pit right in the pond) it pours into the hole and fades into the dark. Mend Earth
+closing the hole stops the waterfall. The first pond of a random layout always straddles
+the front edge; extra ones sit against a hole.
+
+The water follows the style of [David Holland's 3D pixel art](https://www.davidhol.land/articles/3d-pixel-art-rendering/):
+short, world-space, view-aligned horizontal glints that flick on and off, on top of
+palette-banded depth colors (light shallows to deep teal, dithered), a foam line along the
+shore and the spill lips, a drifting sheen, and cloud shadows. Instead of reading the depth
+buffer, depth comes from the same analytic ground height the terrain uses, so it stays
+exact as holes open and mounds rise. Waterfalls are ribbons hung from the lip, traced with
+marching squares on the ground SDF inside the pond (about 12 ms per pond, only when a hole
+near a pond opens or closes); streaks scroll down in world-anchored pixel columns.
 
 Bumps and hills are walkable. Mountain flanks are too steep to climb, and they stop Push
 bolts, which otherwise glide over gentle slopes. Holes can be opened through a hill.
@@ -263,8 +281,8 @@ Each stage only talks to the next one through plain data or signals:
    draws the panel.
 7. **Arena and physics** — holes and mounds are small dictionaries in `Arena`; nothing is
    re-meshed when they change:
-   - **Rendering:** their parameters go into a 64×4 float "features" texture (one texel per
-     hole or mound). The terrain shader lifts the grass top by the mounds in the vertex
+   - **Rendering:** their parameters go into a 64×6 float "features" texture (one texel per
+     hole, mound or pond). The terrain shader lifts the grass top by the mounds in the vertex
      stage and discards its fragments over holes; grass tufts ride the mounds and collapse
      over holes. Each hole has its own rocky wall tube, built once when it opens (~1 ms) and
      only scaled while it opens or closes; its rim follows the mound height in the shader.
@@ -283,6 +301,7 @@ Spell effects are separate from recognition and could be resolved authoritativel
 
 | What | Where |
 |---|---|
+| Ponds: count, radius, depth (water level is `Arena.WATER_LEVEL`); wading speed (`wade_speed` on the character) | `scenes/arena_config.tres` (Ponds group), `scripts/arena/water.gd`, `shaders/water.gdshader`, `shaders/waterfall.gdshader` |
 | Island size (`size_scale`), random layout on/off and feature counts, authored layout, grass density | `scenes/arena_config.tres` (`ArenaConfig`). Edit it in the inspector and the arena rebuilds in the editor (which always shows the authored layout). |
 | Bump / hill / mountain size and growth time | `MOUND_LEVELS`, `MOUND_GROW_TIME` in `scripts/arena/arena.gd` |
 | Camera follow margin, max zoom-out | Exported vars on `scripts/render/pixel_camera.gd` |
@@ -331,7 +350,7 @@ tools/        palette / sprite / font generators, blender/ build scripts
 godot --headless --path . -s tests/test_rhythm.gd
 ```
 
-The suite has 87 checks covering:
+The suite has 89 checks covering:
 
 - tempo lock time and BPM
 - tempo tolerance boundaries

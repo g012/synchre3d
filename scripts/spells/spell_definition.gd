@@ -8,7 +8,7 @@ extends Resource
 ## SpellBook (no recognition code involved).
 
 enum Effect { PUSH, CREATE_HOLE, CLOSE_HOLE, TEMPO_UP, TEMPO_DOWN, RAISE_MINION, SHOCKWAVE,
-	SWAP_BALL, KNOCKOUT }
+	SWAP_BALL, KNOCKOUT, QUICKEN, SNARE_BALL }
 
 ## Button glyphs and spoken syllables, by button index (Xbox layout).
 const BUTTONS: Array[String] = ["A", "B", "X", "Y"]

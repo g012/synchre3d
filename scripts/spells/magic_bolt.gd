@@ -2,10 +2,11 @@ class_name MagicBolt
 extends Node3D
 ## A spell projectile flying straight from the caster's hands, hitting the first enemy it
 ## touches: Push (a big ball of light that shoves hard), Swap (a small fast ball: caster and
-## target trade places) or Knockout (a spinning star that stuns).
+## target trade places), Knockout (a spinning star that stuns) or Snare (a slow, heavy blob
+## that slows the target down).
 ## It glides over gentle slopes but bursts against steep ones (a mountain is a shield).
 
-enum Kind { PUSH, SWAP, KNOCKOUT }
+enum Kind { PUSH, SWAP, KNOCKOUT, SNARE }
 
 const SHADER := preload("res://shaders/magic.gdshader")
 
@@ -24,6 +25,9 @@ var hit_radius := 0.8
 var strength := 15.0
 ## Knockout duration (s).
 var stun_time := 2.0
+## Snare: speed multiplier and duration (s).
+var slow_mult := 0.5
+var slow_time := 3.0
 var palette_index := 15
 
 var _travelled := 0.0
@@ -58,7 +62,8 @@ func _physics_process(delta: float) -> void:
 	if arena:
 		# Climbs anything walkable at once (<= ~50 deg), bursts against steeper ground,
 		# and sinks back gently after a crest.
-		var ground := arena.height_at(Vector2(global_position.x, global_position.z)) + GLIDE
+		# Skims over pond water rather than diving to the bed.
+		var ground := maxf(arena.height_at(Vector2(global_position.x, global_position.z)), Arena.WATER_LEVEL) + GLIDE
 		var climb := ground - global_position.y
 		if climb > step.length() * 1.2 + 0.05:
 			_pop()
@@ -69,6 +74,9 @@ func _physics_process(delta: float) -> void:
 			global_position.y = move_toward(global_position.y, ground, 2.5 * delta)
 	_travelled += step.length()
 	_mesh.scale = Vector3.ONE * (1.0 + 0.12 * sin(_travelled * 9.0))
+	if kind == Kind.SNARE:
+		# A wobbling, heavy blob.
+		_mesh.scale = Vector3(1.0 + 0.15 * sin(_travelled * 5.0), 1.0 - 0.15 * sin(_travelled * 5.0), 1.0)
 	if kind == Kind.KNOCKOUT:
 		_mesh.scale = Vector3(1.0, 0.45, 1.0) * (1.0 + 0.15 * sin(_travelled * 6.0))
 		_mesh.rotation = Vector3(0.0, _travelled * 4.0, 0.5)
@@ -112,6 +120,14 @@ func _hit(target: ArenaCharacter) -> void:
 		Kind.SWAP:
 			if caster.is_alive():
 				_swap(target)
+		Kind.SNARE:
+			target.slow_down(slow_mult, slow_time)
+			if fx:
+				for k in 10:
+					var a := TAU * k / 10.0
+					fx.spawn(global_position, Vector3(cos(a), 0.4, sin(a)) * 1.6, 0.5, FxSprites.TILE_PUFF, palette_index, 2, 7.0, 3.0, 4.0, 2.0)
+			if camera:
+				camera.shake(0.12)
 		Kind.KNOCKOUT:
 			target.knock_out(stun_time)
 			if fx:

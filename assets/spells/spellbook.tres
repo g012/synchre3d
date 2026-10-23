@@ -95,6 +95,28 @@ effect = 4
 palette_index = 14
 description = "Tempo change: the shared tempo slides down over one bar (-10 / -20 / -30 BPM by level, min 80)."
 
+[sub_resource type="Resource" id="quicken"]
+script = ExtResource("2_def")
+id = &"quicken"
+display_name = "Quicken"
+family = SubResource("time")
+middle = PackedInt32Array(2, 2)
+middle_beats = PackedFloat32Array(0.5, 0.5)
+effect = 9
+palette_index = 22
+description = "The caster runs faster for a while (x1.27 / x1.45 / x1.63 for 4 / 8 / 12 beats by level)."
+
+[sub_resource type="Resource" id="snare"]
+script = ExtResource("2_def")
+id = &"snare"
+display_name = "Snare"
+family = SubResource("time")
+middle = PackedInt32Array(2, 1)
+middle_beats = PackedFloat32Array(1, 1)
+effect = 10
+palette_index = 31
+description = "Throws a slow, heavy blob: whoever it hits is slowed down (to 65% / 50% / 38% speed for about 3.6 / 6 / 8.4 beats by level)."
+
 [sub_resource type="Resource" id="hex"]
 script = ExtResource("3_family")
 id = &"hex"
@@ -139,4 +161,4 @@ description = "Necromancy: a small undead double climbs out of the ground in fro
 
 [resource]
 script = ExtResource("1_book")
-spells = Array[ExtResource("2_def")]([SubResource("push"), SubResource("shockwave"), SubResource("create_hole"), SubResource("close_hole"), SubResource("hasten"), SubResource("slow"), SubResource("knockout"), SubResource("swap_ball"), SubResource("raise_minion")])
+spells = Array[ExtResource("2_def")]([SubResource("push"), SubResource("shockwave"), SubResource("create_hole"), SubResource("close_hole"), SubResource("hasten"), SubResource("slow"), SubResource("quicken"), SubResource("snare"), SubResource("knockout"), SubResource("swap_ball"), SubResource("raise_minion")])

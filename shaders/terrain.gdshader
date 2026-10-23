@@ -27,6 +27,7 @@ const int P_GRASS = 23;
 const int P_EARTH_DARK = 24;
 const int P_EARTH = 25;
 const int P_EARTH_LIGHT = 26;
+const int P_SAND = 10;
 
 // Set on hole wall instances: the id of the hole the wall belongs to.
 instance uniform float self_hole_id = -1.0;
@@ -131,6 +132,15 @@ void fragment() {
 		}
 		// Hills stay grassy; only mountain-steep flanks (> ~45 deg) turn to earth and rock.
 		idx = n.y + (bayer4(FRAGCOORD.xy) - 0.5) * 0.06 > 0.7 ? ground_index(v_world.xz, FRAGCOORD.xy) : slope_index(v_world, n.y, FRAGCOORD.xy);
+		// Pond shores: wet sand just above the water, earth below it.
+		if (arena_pond_count > 0) {
+			float above = v_ground_h - WATER_LEVEL + (bayer4(FRAGCOORD.xy) - 0.5) * 0.03;
+			if (above < 0.0) {
+				idx = P_EARTH;
+			} else if (above < 0.07) {
+				idx = P_SAND;
+			}
+		}
 	} else {
 		if (self_hole_id >= 0.0 && arena_holes_dist(v_world.xz, self_hole_id) < 0.0) {
 			discard;

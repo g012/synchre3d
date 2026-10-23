@@ -45,6 +45,9 @@ const HM_CHUNK := 16
 ## Slots in the shader features texture.
 const MAX_HOLES := 64
 const MAX_MOUNDS := 32
+const MAX_PONDS := 8
+## Height of every pond's water surface (the lawn is at 0).
+const WATER_LEVEL := -0.12
 ## Beyond this distance from its rim a hole does not need its exact outline (see ground_sdf).
 const FAR_HOLE := 1.5
 ## Mound levels (radius, height, sharpness): a bump you can walk over, a hill, then a steep
@@ -83,6 +86,9 @@ var holes: Array[Dictionary] = []
 ## Runtime mounds: { id, center, radius, height, sharp, level, ph0, ph1, from, to: Vector3
 ## (radius, height, sharp), t (growth 0..1) }.
 var mounds: Array[Dictionary] = []
+## Ponds (static per layout): { center: Vector2, radius, depth, ph0, ph1 }. A pond is a bowl
+## dug into the ground (`pond_dip`), filled with water up to WATER_LEVEL.
+var ponds: Array[Dictionary] = []
 
 var _rebuild_queued := false
 var _phase := PackedFloat32Array()
@@ -105,6 +111,7 @@ var _hm_origin := Vector2.ZERO
 var _hm_cells := Vector2i.ZERO
 var _hm_island := PackedFloat32Array()
 var _hm_fade := PackedFloat32Array()
+var _hm_pond := PackedFloat32Array()
 var _hm_shapes := {}
 var _hm_data := {}
 var _collision_dirty := Rect2()
@@ -179,16 +186,48 @@ func is_over_ground(p: Vector2) -> bool:
 	return ground_sdf(p) < 0.0
 
 
-## Ground height at `p` (0 = the flat lawn). Same formula as `arena_height` in the shaders.
+## Ground height at `p` (0 = the flat lawn): mounds (flattened near the island edge) plus
+## pond bowls. Same formula as `arena_height` in the shaders.
 func height_at(p: Vector2) -> float:
+	var dip := pond_dip(p)
 	if mounds.is_empty():
-		return 0.0
+		return dip
 	var best := 0.0
 	for m in mounds:
 		best = maxf(best, _mound_value(p, m))
 	if best <= 0.0:
+		return dip
+	return best * smoothstep(ISLAND_FADE.x, ISLAND_FADE.y, -island_sdf(p)) + dip
+
+
+## How far the ponds lower the ground at `p` (<= 0).
+func pond_dip(p: Vector2) -> float:
+	var dip := 0.0
+	for q in ponds:
+		dip = minf(dip, _pond_value(p, q))
+	return dip
+
+
+## Water depth at `p` (0 on dry ground).
+func water_depth(p: Vector2) -> float:
+	if ponds.is_empty() or pond_dip(p) >= 0.0:
 		return 0.0
-	return best * smoothstep(ISLAND_FADE.x, ISLAND_FADE.y, -island_sdf(p))
+	return maxf(WATER_LEVEL - height_at(p), 0.0)
+
+
+## Bowl profile: flat bed out to 55% of the (wobbly) radius, then a smooth shore up to the
+## lawn. Same formula as in toon.gdshaderinc.
+func _pond_value(p: Vector2, q: Dictionary) -> float:
+	var d: Vector2 = p - q.center
+	var r: float = q.radius
+	var l2 := d.length_squared()
+	if l2 >= r * r * 1.3:
+		return 0.0
+	var a := atan2(d.y, d.x)
+	var x := sqrt(l2) / (r * (1.0 + 0.08 * sin(3.0 * a + q.ph0) + 0.05 * sin(5.0 * a + q.ph1)))
+	if x >= 1.0:
+		return 0.0
+	return -q.depth * (1.0 - smoothstep(0.55, 1.0, x))
 
 
 ## Ground slope at `p` as (dh/dx, dh/dz).
@@ -492,9 +531,17 @@ func rebuild() -> void:
 		if c.has_meta("generated"):
 			remove_child(c)
 			c.queue_free()
+	if not has_node("Water") and not Engine.is_editor_hint():
+		var water := Water.new()
+		water.name = "Water"
+		add_child(water)
 	holes.clear()
 	mounds.clear()
 	_walls.clear()
+	ponds.clear()
+	for q in layout.ponds:
+		ponds.append({"center": Vector2(q.x, q.y), "radius": q.z, "depth": layout.pond_depth,
+			"ph0": _rng.randf() * TAU, "ph1": _rng.randf() * TAU})
 	_init_features()
 	_bake_sdf_texture()
 
@@ -783,9 +830,13 @@ func _add_outer_shell(mesh: ArrayMesh, outline: PackedVector2Array, collision: P
 
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	# Follow weight (UV2.x, see terrain.gdshader): the cliff's top rows dip with the ground
+	# where a pond reaches the edge (mounds are flattened there anyway), fading out 0.8 down.
 	for ring in rings:
 		for v in ring:
+			st.set_uv2(Vector2(clampf(1.0 + v.y / 0.8, 0.0, 1.0), 0.0))
 			st.add_vertex(v)
+	st.set_uv2(Vector2.ZERO)
 	st.add_vertex(apex)
 	var apex_i := rings.size() * n
 	# Outline orientation decides the winding; pick it from the first quad so faces point out.
@@ -880,11 +931,14 @@ func _build_collision() -> void:
 	var w := _hm_cells.x + 1
 	_hm_island.resize(w * (_hm_cells.y + 1))
 	_hm_fade.resize(_hm_island.size())
+	_hm_pond.resize(_hm_island.size())
 	for j in _hm_cells.y + 1:
 		for i in w:
-			var d := island_sdf(_hm_origin + Vector2(i, j) * HM_SPACING)
+			var p := _hm_origin + Vector2(i, j) * HM_SPACING
+			var d := island_sdf(p)
 			_hm_island[j * w + i] = d
 			_hm_fade[j * w + i] = smoothstep(ISLAND_FADE.x, ISLAND_FADE.y, -d)
+			_hm_pond[j * w + i] = pond_dip(p)
 	_hm_shapes.clear()
 	_hm_data.clear()
 	var half := HM_CHUNK / 2
@@ -976,7 +1030,7 @@ func _refresh_collision(rect: Rect2) -> void:
 							if x < 1.0:
 								var sm := (1.0 - x * x) * (1.0 - x * x)
 								best = maxf(best, md[6] * lerpf(sm, (1.0 - x) * sqrt(1.0 - x), md[7]))
-						v = best * _hm_fade[k] * inv
+						v = (best * _hm_fade[k] + _hm_pond[k]) * inv
 					data[(j - bj) * n + (i - bi)] = v
 			_hm_data[c] = data
 			(_hm_shapes[c] as HeightMapShape3D).map_data = data
@@ -1010,8 +1064,9 @@ func _mound_cache(m: Dictionary) -> Dictionary:
 ## Holes and mounds for the shaders (see toon.gdshaderinc): one texel per item per row.
 ##   row 0: hole (center.x, center.z, radius, scale)   row 1: (ph0, ph1, wobble, id)
 ##   row 2: mound (center.x, center.z, radius, height) row 3: (ph0, ph1, sharpness, 0)
+##   row 4: pond (center.x, center.z, radius, depth)   row 5: (ph0, ph1, 0, 0)
 func _init_features() -> void:
-	_features_image = Image.create_empty(maxi(MAX_HOLES, MAX_MOUNDS), 4, false, Image.FORMAT_RGBAF)
+	_features_image = Image.create_empty(maxi(MAX_HOLES, MAX_MOUNDS), 6, false, Image.FORMAT_RGBAF)
 	_features_texture = ImageTexture.create_from_image(_features_image)
 	RenderingServer.global_shader_parameter_set("arena_features", _features_texture)
 	_features_dirty = true
@@ -1031,7 +1086,13 @@ func _upload_features() -> void:
 		var m := mounds[i]
 		_features_image.set_pixel(i, 2, Color(m.center.x, m.center.y, m.radius, m.height))
 		_features_image.set_pixel(i, 3, Color(m.ph0, m.ph1, m.sharp, 0.0))
+	var np := mini(ponds.size(), MAX_PONDS)
+	for i in np:
+		var q := ponds[i]
+		_features_image.set_pixel(i, 4, Color(q.center.x, q.center.y, q.radius, q.depth))
+		_features_image.set_pixel(i, 5, Color(q.ph0, q.ph1, 0.0, 0.0))
 	_features_texture.update(_features_image)
+	RenderingServer.global_shader_parameter_set("arena_pond_count", np)
 	RenderingServer.global_shader_parameter_set("arena_hole_count", nh)
 	RenderingServer.global_shader_parameter_set("arena_mound_count", nm)
 	RenderingServer.global_shader_parameter_set("arena_island_fade", ISLAND_FADE)

@@ -270,6 +270,10 @@ arena_mound_count={
 "type": "int",
 "value": 0
 }
+arena_pond_count={
+"type": "int",
+"value": 0
+}
 arena_island_fade={
 "type": "vec2",
 "value": Vector2(0.4, 2.2)

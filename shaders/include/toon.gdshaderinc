@@ -25,9 +25,13 @@ global uniform vec4 arena_sdf_rect;
 // Runtime holes and mounds (written by Arena._upload_features, one texel per item):
 //   row 0: hole (center.x, center.z, radius, scale)   row 1: (ph0, ph1, wobble, id)
 //   row 2: mound (center.x, center.z, radius, height) row 3: (ph0, ph1, sharpness, 0)
+//   row 4: pond (center.x, center.z, radius, depth)   row 5: (ph0, ph1, 0, 0)
 global uniform sampler2D arena_features : filter_nearest, repeat_disable;
 global uniform int arena_hole_count;
 global uniform int arena_mound_count;
+global uniform int arena_pond_count;
+// Height of every pond's water surface. Mirrors Arena.WATER_LEVEL.
+const float WATER_LEVEL = -0.12;
 // Mounds flatten out between these distances inside the island edge.
 global uniform vec2 arena_island_fade;
 
@@ -132,11 +136,41 @@ float arena_ground_sdf(vec2 xz) {
 	return max(arena_sdf_at(xz).g, -arena_holes_dist(xz, -1.0));
 }
 
+// Pond bowls at `xz`: vec3(dip <= 0, d/dx, d/dz). Mirrors Arena.pond_dip(): a flat bed out
+// to 55% of the wobbly radius, then a smooth shore up to the lawn.
+vec3 arena_pond(vec2 xz) {
+	vec3 best = vec3(0.0);
+	for (int i = 0; i < arena_pond_count; i++) {
+		vec4 a = texelFetch(arena_features, ivec2(i, 4), 0);
+		vec2 d = xz - a.xy;
+		float l = length(d);
+		if (l * l >= a.z * a.z * 1.3) {
+			continue;
+		}
+		vec4 b = texelFetch(arena_features, ivec2(i, 5), 0);
+		float ang = atan(d.y, d.x);
+		float rr = a.z * (1.0 + 0.08 * sin(3.0 * ang + b.x) + 0.05 * sin(5.0 * ang + b.y));
+		float x = l / rr;
+		if (x >= 1.0) {
+			continue;
+		}
+		float t = clamp((x - 0.55) / 0.45, 0.0, 1.0);
+		float h = -a.w * (1.0 - t * t * (3.0 - 2.0 * t));
+		if (h < best.x) {
+			float dh = a.w * 6.0 * t * (1.0 - t) / 0.45 / rr;
+			best = vec3(h, dh * d / max(l, 1e-4));
+		}
+	}
+	return best;
+}
+
 // Ground height and slope at `xz`: vec3(height, dh/dx, dh/dz). Mirrors Arena.height_at();
-// the slope is the analytic radial derivative of the tallest mound (normals only).
+// the slope is the analytic radial derivative of the tallest mound (normals only), plus the
+// pond bowl's.
 vec3 arena_height(vec2 xz) {
+	vec3 pond = arena_pond_count > 0 ? arena_pond(xz) : vec3(0.0);
 	if (arena_mound_count == 0) {
-		return vec3(0.0);
+		return pond;
 	}
 	float best = 0.0;
 	vec2 grad = vec2(0.0);
@@ -165,7 +199,7 @@ vec3 arena_height(vec2 xz) {
 		}
 	}
 	float fade = smoothstep(arena_island_fade.x, arena_island_fade.y, -arena_sdf_at(xz).g);
-	return vec3(best, grad) * fade;
+	return vec3(best, grad) * fade + pond;
 }
 
 // Lighting normal for the ground at slope `grad` (dh/dx, dh/dz). The slope is exaggerated so

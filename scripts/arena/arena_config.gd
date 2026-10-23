@@ -46,6 +46,17 @@ extends Resource
 ## Organic wobble applied to hole outlines.
 @export var hole_wobble := 0.12
 
+@export_group("Ponds")
+## One entry per pond: (centre x, centre z, radius). Shallow water you can wade through; where
+## a pond meets the island edge or a hole, it spills over as a waterfall.
+@export var ponds: Array[Vector3] = [Vector3(1.2, 5.0, 1.7)]
+## Random layouts: how many ponds (the first spills over the front edge, the next ones sit
+## against a hole), and their radius.
+@export var pond_count := Vector2i(1, 2)
+@export var pond_radius := Vector2(1.6, 2.3)
+## Depth of a pond's bed below the lawn (the water surface sits at Arena.WATER_LEVEL).
+@export var pond_depth := 0.42
+
 @export_group("Vegetation")
 ## Grass blades per square unit inside grass clumps.
 @export var grass_density := 46.0

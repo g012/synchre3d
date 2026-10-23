@@ -193,8 +193,10 @@ func _choose_spell(c: ArenaCharacter) -> SpellDefinition:
 					w = 2.0
 			SpellDefinition.Effect.SHOCKWAVE:
 				w = 2.0 if dist < 2.6 else 0.0
-			SpellDefinition.Effect.KNOCKOUT, SpellDefinition.Effect.SWAP_BALL:
+			SpellDefinition.Effect.KNOCKOUT, SpellDefinition.Effect.SWAP_BALL, SpellDefinition.Effect.SNARE_BALL:
 				w = 0.8 if dist > 2.0 and dist < 7.0 else 0.0
+			SpellDefinition.Effect.QUICKEN:
+				w = 0.6 if dist > 3.0 else 0.0
 			SpellDefinition.Effect.RAISE_MINION:
 				w = 0.8
 			SpellDefinition.Effect.TEMPO_UP, SpellDefinition.Effect.TEMPO_DOWN:
@@ -209,7 +211,8 @@ func _choose_spell(c: ArenaCharacter) -> SpellDefinition:
 
 static func _aimed(s: SpellDefinition) -> bool:
 	return s.effect in [SpellDefinition.Effect.PUSH, SpellDefinition.Effect.CREATE_HOLE,
-		SpellDefinition.Effect.CLOSE_HOLE, SpellDefinition.Effect.SWAP_BALL, SpellDefinition.Effect.KNOCKOUT]
+		SpellDefinition.Effect.CLOSE_HOLE, SpellDefinition.Effect.SWAP_BALL, SpellDefinition.Effect.KNOCKOUT,
+		SpellDefinition.Effect.SNARE_BALL]
 
 
 ## 0 when well inside the ground, rising to 1 at the edge and beyond.

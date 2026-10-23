@@ -40,6 +40,8 @@ varying vec2 v_frag;
 varying float v_height;
 varying float v_petal;
 varying float v_center;
+// 1 when the tuft would stand in pond water or on its sandy shore (not drawn).
+varying flat float v_drown;
 
 vec2 actor_push(vec2 base, vec4 actor) {
 	vec2 d = base - actor.xz;
@@ -53,6 +55,7 @@ void vertex() {
 	// Tufts ride the mounds; steep slopes are bare rock.
 	vec3 hg = arena_height(base.xz);
 	base.y += hg.x;
+	v_drown = hg.x < WATER_LEVEL + 0.08 ? 1.0 : 0.0;
 	// abs(): the projection may carry a Y flip depending on the rendering backend.
 	float texel = 2.0 / abs(PROJECTION_MATRIX[1][1] * VIEWPORT_SIZE.y);
 	vec2 grid_off = mod(VIEWPORT_SIZE, 2.0) * 0.5 * texel;
@@ -102,6 +105,9 @@ void vertex() {
 }
 
 void fragment() {
+	if (v_drown > 0.5) {
+		discard;
+	}
 	vec4 s = texture(atlas, vec2((UV.x + v_tile) / atlas_tiles, UV.y));
 	ALPHA = s.a;
 	ALPHA_SCISSOR_THRESHOLD = 0.5;
