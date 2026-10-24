@@ -223,7 +223,7 @@ func _apply_survival() -> void:
 	inputs[0].prefixes = ["p1_", "p2_"]
 	var pip := fighters[0]
 	var brain := PlayerBrain.new(inputs[0])
-	brain.auto_aim_on_hold = true
+	brain.no_auto_aim = true
 	pip.brain = brain
 	pip.auto_aim = false
 	pip.opponent = null

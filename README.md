@@ -52,7 +52,7 @@ Project Settings.
 | Jump | RT (analog, 50% threshold, one jump per pull) | Space | Numpad 0 / Numpad Enter |
 | Shove (melee push) | RB | E | Numpad . |
 | Dash (toward the stick, else forward; 0.65 s cooldown, one per jump in the air) | LB | Left Shift | Numpad + |
-| Hold: strafe (keep facing). Duels: manual aim while held (auto-aim otherwise); survival: auto-aim while held (manual otherwise) | LT | Q | Numpad − |
+| Hold: strafe (keep facing). Duels: also manual aim while held (auto-aim otherwise); survival: aim is always manual | LT | Q | Numpad − |
 | Pause menu (resume / restart / quit) | Start or Back | R or Esc | |
 | Hide / show the spell sheets | R3 (right stick click) | F2 | |
 | Fullscreen / debug: hide outline pass | | F11 / F1 | |
@@ -122,12 +122,11 @@ console). The camera follows both fighters and zooms out a little when they are 
    **A spell can start on any beat** (or between beats): the rhythm is checked relative to
    your own first syllable, as in the original.
 
-   **Auto-aim** (duels: on unless LT is held; survival: only while LT is held): aimed spells (Push, Swap, Knockout, Open Pit,
+   **Auto-aim** (duels only, unless LT is held; never in survival): aimed spells (Push, Swap, Knockout, Open Pit,
    Mend Earth's raised ground, Minion) turn you toward your opponent (survival: the nearest
    enemy) as they fire. **Hold LT** to strafe: you keep facing the way you face while you
    move, and dashes and shoves don't turn you either. In duels it also switches to manual
-   aim (spells fire straight ahead); in survival it is the other way round: aim is manual
-   unless LT is held, which turns spells toward the nearest enemy. Mend Earth still closes the holes in front of where you faced.
+   aim (spells fire straight ahead); in survival aim is always manual, LT only strafes. Mend Earth still closes the holes in front of where you faced.
 3. **Read the feedback.** Gathered magic grows at your hands with each correct syllable, and
    your character poses and bobs. While your syllables could still become several spells
    (they share an opening, like X for Open Pit, Swap and Knockout), the magic is a pale,

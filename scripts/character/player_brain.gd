@@ -7,8 +7,8 @@ extends CharacterBrain
 const JUMP_BUFFER := 0.12
 
 var input: PlayerInput
-## Survival: auto-aim only while LT is held (duels: auto-aim unless LT is held).
-var auto_aim_on_hold := false
+## Survival: never auto-aim (duels: auto-aim unless LT is held).
+var no_auto_aim := false
 var _jump_buffer := 0.0
 var _push_buffer := 0.0
 var _dash_buffer := 0.0
@@ -20,11 +20,10 @@ func _init(player_input: PlayerInput) -> void:
 
 func update(character: ArenaCharacter, delta: float) -> void:
 	# Holding LT: the character keeps facing where it faces (strafing). In duels it also
-	# switches to manual aim; in survival it is the other way round: aiming is manual unless
-	# LT is held (then spells turn to the nearest enemy).
+	# switches to manual aim; in survival aim is always manual.
 	var hold := input.aim_held()
 	character.strafe = hold
-	character.auto_aim = hold if auto_aim_on_hold else not hold
+	character.auto_aim = false if no_auto_aim else not hold
 	_jump_buffer = maxf(_jump_buffer - delta, 0.0)
 	_push_buffer = maxf(_push_buffer - delta, 0.0)
 	_dash_buffer = maxf(_dash_buffer - delta, 0.0)

@@ -135,7 +135,7 @@ func _draw() -> void:
 	# Aim mode: auto or manual, and strafing while LT is held.
 	var ch := caster.character
 	if ch.strafe:
-		_text(Vector2(4, 35), "STRAFE + AUTO-AIM" if ch.auto_aim else "STRAFE / AIM", Color("86a2ea"))
+		_text(Vector2(4, 35), "STRAFE", Color("86a2ea"))
 	elif ch.auto_aim:
 		_text(Vector2(4, 35), "AUTO-AIM", PERFECT_COLOR)
 	else:
