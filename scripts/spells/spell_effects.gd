@@ -44,10 +44,10 @@ const SOUNDS := {
 ## Shockwave: reach around the caster and knockback (at the centre; 55% at the rim).
 @export var shockwave_radius := 3.4
 @export var shockwave_push := 14.0
-## Push beam ridge (level 2+): where it starts, how fast it runs, mound spacing, knockback.
-@export var wake_start := 1.3
+## Push beam ridges (level 2+): where they start beside the caster, how fast their front
+## runs along the beam, knockback.
+@export var wake_start := 1.0
 @export var wake_speed := 16.0
-@export var wake_spacing := 0.9
 @export var wake_force := 1.0
 ## Knockout: beats the target stays down.
 @export var knockout_beats := 4.0
@@ -86,7 +86,10 @@ func setup(arena_node: Arena, fx_node: FxSprites, cam: PixelCamera, all_characte
 	characters = all_characters
 	arena.hole_opened.connect(func(h: Dictionary): _animating.erase(h.id))
 	arena.hole_closed.connect(func(h: Dictionary): _animating.erase(h.id))
-	arena.mound_raised.connect(func(m: Dictionary): _rising.erase(m.id))
+	# Risen: stop shoving. A beam ridge still stretching keeps going (see _update_wakes).
+	arena.mound_raised.connect(func(m: Dictionary):
+		if not m.get("stretching", false):
+			_rising.erase(m.id))
 	_sfx = AudioStreamPlayer.new()
 	var poly := AudioStreamPolyphonic.new()
 	poly.polyphony = 6
@@ -238,8 +241,8 @@ func _cast_quicken(spell: SpellDefinition, caster: ArenaCharacter) -> void:
 
 
 ## Push: a beam straight ahead (longer, wider, harder at each level); from level 2 the ground
-## heaves up along both sides of it as it goes, bumps (hills at level 3) that throw enemies
-## out to the sides, like the sea parting.
+## heaves up along both sides of it as it goes: one long bump (a hill at level 3) per side,
+## racing along the beam and throwing enemies out to the sides, like the sea parting.
 func _cast_beam(spell: SpellDefinition, caster: ArenaCharacter, origin: Vector3) -> void:
 	var beam := MagicBeam.new()
 	beam.caster = caster
@@ -256,38 +259,53 @@ func _cast_beam(spell: SpellDefinition, caster: ArenaCharacter, origin: Vector3)
 	add_child(beam)
 	caster.velocity -= caster.facing * 2.0
 	if _level >= 2:
-		var d := Vector2(caster.facing.x, caster.facing.z).normalized()
-		_wakes.append({"caster": caster, "origin": Vector2(caster.global_position.x, caster.global_position.z),
-			"dir": d, "length": beam.length, "level": _level - 1, "travelled": 0.0, "next": wake_start,
-			"offset": beam.width * 0.5 + Arena.MOUND_LEVELS[_level - 2].x * 0.6, "pushed": {},
-			"palette": spell.palette_index, "force": _power})
+		_start_wake(caster, beam, spell.palette_index)
 	_sound("push", 0.8)
 	resolved.emit(caster, spell, true, "")
 
 
-## The beam's ridges: temporary mounds raised one pair after another, either side of its path.
+## The beam's two ridges: each a long mound starting just beside the caster, whose far end
+## then races along the beam (wake_speed) until the beam's end.
+func _start_wake(caster: ArenaCharacter, beam: MagicBeam, palette: int) -> void:
+	var d := Vector2(caster.facing.x, caster.facing.z).normalized()
+	var level := _level - 1
+	var offset := beam.width * 0.5 + Arena.MOUND_LEVELS[level - 1].x * 0.6
+	var origin := Vector2(caster.global_position.x, caster.global_position.z)
+	var travel := (beam.length - wake_start) / wake_speed
+	var w := {"caster": caster, "origin": origin, "dir": d, "length": beam.length, "travelled": wake_start,
+		"ridges": [], "pushed": {}}
+	for side in [1.0, -1.0]:
+		var start: Vector2 = origin + d * wake_start + Vector2(-d.y, d.x) * offset * side
+		var m := arena.raise_ridge(start, level, 0.15, travel + 0.1, 0.35)
+		if m.is_empty():
+			continue
+		m.stretching = true
+		# One shared "pushed" set: each enemy gets a single shove per beam.
+		_rising[m.id] = {"caster": caster, "palette": palette, "pushed": w.pushed, "force": wake_force * _power,
+			"damage": 6.0, "axis_origin": origin, "axis_dir": d}
+		w.ridges.append([m, start])
+	if not w.ridges.is_empty():
+		_wakes.append(w)
+
+
 func _update_wakes(delta: float) -> void:
 	for i in range(_wakes.size() - 1, -1, -1):
 		var w: Dictionary = _wakes[i]
-		w.travelled += wake_speed * delta
-		var d: Vector2 = w.dir
-		var side: Vector2 = Vector2(-d.y, d.x) * float(w.offset)
-		while w.next <= minf(w.travelled, w.length):
-			var c: Vector2 = w.origin + w.dir * w.next
-			w.next += wake_spacing * (1.0 + 0.4 * (w.level - 1))
-			for p in [c + side, c - side]:
-				if not arena.is_over_ground(p):
-					continue
-				var m := arena.raise_temporary(p, w.level, 0.16, 0.12, 0.3)
-				if m.is_empty():
-					continue
-				# One shared "pushed" set: each enemy gets a single shove per beam.
-				_rising[m.id] = {"caster": w.caster, "palette": w.palette, "pushed": w.pushed, "force": wake_force * w.force,
-					"damage": 6.0, "axis_origin": w.origin, "axis_dir": w.dir}
-				if fx and randf() < 0.5:
-					fx.spawn(Vector3(p.x, arena.height_at(p) + 0.1, p.y), Vector3(randf_range(-1, 1), 2.5, randf_range(-1, 1)), 0.4,
-						FxSprites.TILE_PUFF, 25, 2, 6.0, 2.0, 6.0, 2.0)
-		if w.next > w.length:
+		w.travelled = minf(w.travelled + wake_speed * delta, w.length)
+		var reach: float = w.travelled - wake_start
+		for r in w.ridges:
+			var m: Dictionary = r[0]
+			if m.level <= 0:
+				continue # already sinking
+			arena.set_ridge_end(m, (r[1] as Vector2) + (w.dir as Vector2) * reach)
+			if fx and randf() < 0.4:
+				var p: Vector2 = m.end
+				fx.spawn(Vector3(p.x, arena.height_at(p) + 0.1, p.y), Vector3(randf_range(-1, 1), 2.5, randf_range(-1, 1)), 0.4,
+					FxSprites.TILE_PUFF, 25, 2, 6.0, 2.0, 6.0, 2.0)
+		if w.travelled >= w.length:
+			for r in w.ridges:
+				r[0].stretching = false
+				_rising.erase(r[0].id)
 			_wakes.remove_at(i)
 
 
@@ -562,7 +580,7 @@ func _physics_process(delta: float) -> void:
 		for c in (info.caster as ArenaCharacter).enemies():
 			if info.pushed.has(c):
 				continue
-			var d := Vector2(c.global_position.x, c.global_position.z) - (m.center as Vector2)
+			var d := arena.mound_offset(Vector2(c.global_position.x, c.global_position.z), m)
 			if d.length() > m.radius * 1.05 + ArenaCharacter.RADIUS:
 				continue
 			var out := d.normalized() if d.length() > 0.05 else Vector2(info.caster.facing.x, info.caster.facing.z)

@@ -21,7 +21,7 @@ than the Push spell. More spells wait in the [spell book](docs/spellbook.md).
 
 The game opens on a **menu** (stick / D-pad / arrows to choose, A / Enter / Start to pick):
 
-- **Single player: survival.** Pip alone on an endless field riddled with holes. Enemies
+- **Single player: survival.** Pip alone on an endless field dotted with holes and ponds. Enemies
   (shadowy mushroom grunts) keep coming from just off screen and rush you, forever: more of
   them, faster, tougher and in packs as the minutes pass. They die when they fall into a hole
   or run out of health (shoves and spells hurt them); you lose when you fall or your health
@@ -69,8 +69,10 @@ delay. Holes and mounds made by spells reset each round.
 
 **Survival field:** the same Arena node switches to an endless mode (`Arena.endless`): no
 island edge, flat ground that streams around the player (a fixed set of ground chunks moved
-along, collision chunks recycled, grass generated chunk by chunk), and holes generated per
-7×7 cell from a hash of the cell, so a place keeps its holes when you come back. The grass
+along, collision chunks recycled, grass generated chunk by chunk), holes generated per
+7×7 cell from a hash of the cell (about half the cells have one), and ponds per 14×14 cell
+(40% chance; their water and waterfalls come and go with them), so a place keeps its holes
+and ponds when you come back. The grass
 shader drops tufts over holes by itself, so grass never waits for holes. Enemies are
 ordinary fighters with health and a cheap `SwarmBrain` (rush, sidestep holes, shove);
 `scripts/survival.gd` spawns them and ramps the pressure up over three minutes.
@@ -107,8 +109,9 @@ console). The camera follows both fighters and zooms out a little when they are 
 
    **Push** is a beam: it shoots out at once (no travel time), shoves and hurts everyone
    along it, and grows longer and wider with each level. From level 2 the ground heaves up
-   along both sides of it as it goes, like the sea parting: bumps (hills at level 3) that
-   throw enemies out to the sides. **Minion** raises 2 small minions at level 2, and 3
+   along both sides of it as it goes, like the sea parting: one long continuous bump per
+   side (a hill at level 3), whose front races along the beam, throwing enemies out to the
+   sides. **Minion** raises 2 small minions at level 2, and 3
    bigger, stronger, quicker ones wreathed in sparks at level 3. Rhythms, effects and per-level numbers
    are in the [spell book](docs/spellbook.md).
 

@@ -37,6 +37,8 @@ signal hole_closed(hole: Dictionary)
 signal ground_changed(rect: Rect2)
 ## A mound finished growing to its new level.
 signal mound_raised(mound: Dictionary)
+## The set of ponds changed (endless field streaming).
+signal ponds_changed
 
 const LAYER_FLOOR := 1
 const LAYER_WALLS := 2
@@ -94,10 +96,12 @@ var decor_footprints: Array[Vector3] = []
 ## duration (s for a full open/close), ph0, ph1 (outline wobble phases), dynamic: bool }.
 var holes: Array[Dictionary] = []
 ## Runtime mounds: { id, center, radius, height, sharp, level, ph0, ph1, from, to: Vector3
-## (radius, height, sharp), t (growth 0..1) }.
+## (radius, height, sharp), t (growth 0..1) }. A ridge also has `end`: its height then
+## depends on the distance to the segment center-end instead of to the center.
 var mounds: Array[Dictionary] = []
-## Ponds (static per layout): { center: Vector2, radius, depth, ph0, ph1 }. A pond is a bowl
-## dug into the ground (`pond_dip`), filled with water up to WATER_LEVEL.
+## Ponds: { id, center: Vector2, radius, depth, ph0, ph1 } (static per island layout,
+## streamed in the endless field). A pond is a bowl dug into the ground (`pond_dip`), filled
+## with water up to WATER_LEVEL.
 var ponds: Array[Dictionary] = []
 
 var _rebuild_queued := false
@@ -249,8 +253,20 @@ func height_gradient(p: Vector2) -> Vector2:
 		height_at(p + Vector2(0, e)) - height_at(p - Vector2(0, e))) / (2.0 * e)
 
 
+## `p` relative to the nearest point of mound `m`'s spine (its center, or the segment
+## center-end of a ridge).
+func mound_offset(p: Vector2, m: Dictionary) -> Vector2:
+	if not m.has("end"):
+		return p - m.center
+	var a: Vector2 = m.center
+	var ab: Vector2 = m.end - a
+	var l2 := ab.length_squared()
+	var t := clampf((p - a).dot(ab) / l2, 0.0, 1.0) if l2 > 1e-6 else 0.0
+	return p - (a + ab * t)
+
+
 func _mound_value(p: Vector2, m: Dictionary) -> float:
-	var d: Vector2 = p - m.center
+	var d: Vector2 = mound_offset(p, m)
 	var r: float = m.radius
 	var l2 := d.length_squared()
 	if m.height <= 0.0 or l2 >= r * r * 1.3689: # (1.17 r)^2: max outline wobble
@@ -409,6 +425,26 @@ func raise_temporary(p: Vector2, level: int, rise: float, hold: float, sink: flo
 	return m
 
 
+## Like raise_temporary, but a ridge: a long mound along the segment p-p (stretch it with
+## set_ridge_end). The Push beam raises one along each side of its path.
+func raise_ridge(p: Vector2, level: int, rise: float, hold: float, sink: float) -> Dictionary:
+	var m := raise_temporary(p, level, rise, hold, sink)
+	if not m.is_empty():
+		m.end = p
+	return m
+
+
+## Moves the far end of ridge `m` (its collision and look follow).
+func set_ridge_end(m: Dictionary, end: Vector2) -> void:
+	var before := _mound_rect(m)
+	m.end = end
+	var r := before.merge(_mound_rect(m))
+	_mound_dirty = r if not _has_mound_dirty else _mound_dirty.merge(r)
+	_has_mound_dirty = true
+	_features_dirty = true
+	ground_changed.emit(r)
+
+
 ## Grows mound `m` to its next level. Returns {"mound": m} or {"error": reason}.
 func grow_mound(m: Dictionary) -> Dictionary:
 	if m.level >= MOUND_LEVELS.size():
@@ -438,7 +474,10 @@ func lower_mound(m: Dictionary) -> Dictionary:
 
 func _mound_rect(m: Dictionary) -> Rect2:
 	var r: float = maxf(maxf(m.radius, m.to.x), m.from.x) * 1.17 + HM_SPACING
-	return Rect2(m.center - Vector2(r, r), Vector2(r, r) * 2.0)
+	var rect := Rect2(m.center - Vector2(r, r), Vector2(r, r) * 2.0)
+	if m.has("end"):
+		rect = rect.merge(Rect2(m.end - Vector2(r, r), Vector2(r, r) * 2.0))
+	return rect
 
 
 # ---------------------------------------------------------------- animation
@@ -580,8 +619,9 @@ func rebuild() -> void:
 	_walls.clear()
 	ponds.clear()
 	for q in layout.ponds:
-		ponds.append({"center": Vector2(q.x, q.y), "radius": q.z, "depth": layout.pond_depth,
+		ponds.append({"id": _next_id, "center": Vector2(q.x, q.y), "radius": q.z, "depth": layout.pond_depth,
 			"ph0": _rng.randf() * TAU, "ph1": _rng.randf() * TAU})
+		_next_id += 1
 	_init_features()
 	_bake_sdf_texture()
 
@@ -1032,7 +1072,13 @@ func _refresh_collision(rect: Rect2) -> void:
 	# Per mound: [cached distances, origin i, origin j, width, height, 1/radius, height, sharp]
 	# (plain locals in the hot loop: GDScript dictionary lookups are slow).
 	var near_mounds: Array[Array] = []
+	# Ridges (long mounds) change shape as they stretch: no distance cache, evaluated directly.
+	var near_ridges: Array[Dictionary] = []
 	for m in mounds:
+		if m.has("end"):
+			if m.height > 0.0 and _mound_rect(m).intersects(rect):
+				near_ridges.append(m)
+			continue
 		if m.height > 0.0 and m.radius > 0.0 and rect.grow(m.radius * 1.17).has_point(m.center):
 			var cache := _mound_cache(m)
 			var a0: Vector2i = cache.a0
@@ -1073,6 +1119,10 @@ func _refresh_collision(rect: Rect2) -> void:
 							if x < 1.0:
 								var sm := (1.0 - x * x) * (1.0 - x * x)
 								best = maxf(best, md[6] * lerpf(sm, (1.0 - x) * sqrt(1.0 - x), md[7]))
+						if not near_ridges.is_empty():
+							var p := _hm_origin + Vector2(i, j) * HM_SPACING
+							for rm in near_ridges:
+								best = maxf(best, _mound_value(p, rm))
 						v = (best * _hm_fade[k] + _hm_pond[k]) * inv
 					data[(j - bj) * n + (i - bi)] = v
 			_hm_data[c] = data
@@ -1108,8 +1158,9 @@ func _mound_cache(m: Dictionary) -> Dictionary:
 ##   row 0: hole (center.x, center.z, radius, scale)   row 1: (ph0, ph1, wobble, id)
 ##   row 2: mound (center.x, center.z, radius, height) row 3: (ph0, ph1, sharpness, 0)
 ##   row 4: pond (center.x, center.z, radius, depth)   row 5: (ph0, ph1, 0, 0)
+##   row 6: mound spine end (end.x, end.z, 0, 0): a ridge's far end, else its center
 func _init_features() -> void:
-	_features_image = Image.create_empty(maxi(MAX_HOLES, MAX_MOUNDS), 6, false, Image.FORMAT_RGBAF)
+	_features_image = Image.create_empty(maxi(MAX_HOLES, MAX_MOUNDS), 7, false, Image.FORMAT_RGBAF)
 	_features_texture = ImageTexture.create_from_image(_features_image)
 	RenderingServer.global_shader_parameter_set("arena_features", _features_texture)
 	_features_dirty = true
@@ -1129,6 +1180,8 @@ func _upload_features() -> void:
 		var m := mounds[i]
 		_features_image.set_pixel(i, 2, Color(m.center.x, m.center.y, m.radius, m.height))
 		_features_image.set_pixel(i, 3, Color(m.ph0, m.ph1, m.sharp, 0.0))
+		var e: Vector2 = m.get("end", m.center)
+		_features_image.set_pixel(i, 6, Color(e.x, e.y, 0.0, 0.0))
 	var np := mini(ponds.size(), MAX_PONDS)
 	for i in np:
 		var q := ponds[i]
@@ -1180,8 +1233,12 @@ const COLLISION_WINDOW := 12
 ## Hole cells: size, and how many cells around the focus have their holes.
 const HOLE_CELL := 7.0
 const HOLE_RANGE := 2
-## No holes this close to where a run starts.
+## No holes or ponds this close to where a run starts.
 const SAFE_START := 4.0
+## Pond cells: size, chance that one holds a pond, and range (in cells) around the focus.
+const POND_CELL := 14.0
+const POND_CHANCE := 0.4
+const POND_RANGE := 1
 ## Spell holes and mounds this far from the focus are dropped.
 const FORGET_DISTANCE := 40.0
 
@@ -1192,6 +1249,7 @@ var _ecol_pool: Array[Dictionary] = []
 # Hole cells currently populated (Vector2i -> true), and holes waiting to be added.
 var _hole_cells := {}
 var _hole_queue: Array[Array] = []
+var _pond_cells := {}
 
 
 func _rebuild_endless() -> void:
@@ -1223,6 +1281,7 @@ func _rebuild_endless() -> void:
 	_ecol_pool.clear()
 	_hole_cells.clear()
 	_hole_queue.clear()
+	_pond_cells.clear()
 	_init_features()
 	_bake_sdf_texture()
 	# One flat grid mesh, shared by every ground chunk (UV2 = (1, 1): grass top, follows mounds).
@@ -1263,6 +1322,7 @@ func _stream() -> void:
 	for k in _ground_chunks.size():
 		var c := gc + Vector2i(k % GROUND_WINDOW - half, k / GROUND_WINDOW - half)
 		_ground_chunks[k].position = Vector3((c.x + 0.5) * GROUND_CHUNK, 0.0, (c.y + 0.5) * GROUND_CHUNK)
+	_stream_ponds()
 	_stream_holes()
 	_stream_collision()
 
@@ -1311,13 +1371,58 @@ func _stream_holes() -> void:
 		h.cell = q[0]
 
 
-## Holes of world cell `c` (x, z, radius): 0-2, placed from a hash of the cell so they are
-## the same every time the cell comes back into range.
+## Ponds come and go with their cells (a pond is static while it exists).
+func _stream_ponds() -> void:
+	var fc := Vector2i(floori(focus.x / POND_CELL), floori(focus.y / POND_CELL))
+	var needed := {}
+	for dj in range(-POND_RANGE, POND_RANGE + 1):
+		for di in range(-POND_RANGE, POND_RANGE + 1):
+			needed[fc + Vector2i(di, dj)] = true
+	var changed := false
+	for i in range(ponds.size() - 1, -1, -1):
+		if ponds[i].has("cell") and not needed.has(ponds[i].cell):
+			_mark_collision(_pond_rect(ponds[i]))
+			ponds.remove_at(i)
+			changed = true
+	for c in _pond_cells.keys():
+		if not needed.has(c):
+			_pond_cells.erase(c)
+	for c in needed:
+		if _pond_cells.has(c):
+			continue
+		_pond_cells[c] = true
+		var rng := RandomNumberGenerator.new()
+		rng.seed = hash(Vector3i(c.x, c.y, layout_seed + 7919))
+		if rng.randf() >= POND_CHANCE or ponds.size() >= MAX_PONDS:
+			continue
+		var r := rng.randf_range(layout.pond_radius.x, layout.pond_radius.y)
+		var m := r + 1.0
+		var p := Vector2(c) * POND_CELL + Vector2(rng.randf_range(m, POND_CELL - m), rng.randf_range(m, POND_CELL - m))
+		if p.length() < SAFE_START + r:
+			continue
+		var q := {"id": _next_id, "center": p, "radius": r, "depth": layout.pond_depth,
+			"ph0": rng.randf() * TAU, "ph1": rng.randf() * TAU, "cell": c}
+		_next_id += 1
+		ponds.append(q)
+		_mark_collision(_pond_rect(q))
+		changed = true
+	if changed:
+		_features_dirty = true
+		ponds_changed.emit()
+
+
+func _pond_rect(q: Dictionary) -> Rect2:
+	var r: float = q.radius * 1.15 + HM_SPACING
+	return Rect2(q.center - Vector2(r, r), Vector2(r, r) * 2.0)
+
+
+## Holes of world cell `c` (x, z, radius): usually 0 or 1 (rarely 2), placed from a hash of
+## the cell so they are the same every time the cell comes back into range.
 func _cell_holes(c: Vector2i) -> Array[Vector3]:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash(Vector3i(c.x, c.y, layout_seed))
 	var roll := rng.randf()
-	var n := 0 if roll < 0.25 else (1 if roll < 0.8 else 2)
+	var n := 0 if roll < 0.5 else (1 if roll < 0.93 else 2)
 	var out: Array[Vector3] = []
 	for k in n * 4:
 		if out.size() >= n:
@@ -1375,8 +1480,8 @@ func _new_collision_chunk() -> Dictionary:
 	return {"body": body, "shape": shape, "data": data}
 
 
-## Heights of one collision chunk: NaN over holes, else the ground height (mounds; no
-## ponds in the endless field). Only holes and mounds reaching the chunk are evaluated.
+## Heights of one collision chunk: NaN over holes, else the ground height (mounds and
+## ponds). Only holes, mounds and ponds reaching the chunk are evaluated.
 func _fill_collision_chunk(c: Vector2i, e: Dictionary) -> void:
 	var o := Vector2(c * HM_CHUNK) * HM_SPACING
 	var rect := Rect2(o, Vector2.ONE * HM_CHUNK * HM_SPACING)
@@ -1388,10 +1493,21 @@ func _fill_collision_chunk(c: Vector2i, e: Dictionary) -> void:
 	var mound_centers := PackedVector2Array()
 	var mound_reach2 := PackedFloat32Array()
 	for m in mounds:
-		if m.height > 0.0 and rect.grow(m.radius * 1.17).has_point(m.center):
+		if m.height <= 0.0:
+			continue
+		if m.has("end"):
+			if _mound_rect(m).intersects(rect):
+				near_mounds.append(m)
+				mound_centers.append(m.center)
+				mound_reach2.append(INF) # a ridge: no cheap center test
+		elif rect.grow(m.radius * 1.17).has_point(m.center):
 			near_mounds.append(m)
 			mound_centers.append(m.center)
 			mound_reach2.append(m.radius * m.radius * 1.3689)
+	var near_ponds: Array[Dictionary] = []
+	for q in ponds:
+		if rect.grow(q.radius * 1.15).has_point(q.center):
+			near_ponds.append(q)
 	var data: PackedFloat32Array = e.data
 	var inv := 1.0 / HM_SPACING
 	var n := HM_CHUNK + 1
@@ -1408,7 +1524,10 @@ func _fill_collision_chunk(c: Vector2i, e: Dictionary) -> void:
 					# Cheap reject before the full (trigonometric) profile.
 					if p.distance_squared_to(mound_centers[mi]) < mound_reach2[mi]:
 						best = maxf(best, _mound_value(p, near_mounds[mi]))
-				v = best * inv
+				var dip := 0.0
+				for q in near_ponds:
+					dip = minf(dip, _pond_value(p, q))
+				v = (best + dip) * inv
 			data[j * n + i] = v
 	e.data = data
 	(e.shape as HeightMapShape3D).map_data = data

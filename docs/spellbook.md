@@ -32,7 +32,7 @@ Rhythms below are the gaps in beats before each note (the first note's lead-in i
 
 | Spell | Middle | Level 1 / 2 / 3 chant | Effect by level |
 |---|---|---|---|
-| **Push** | B X (½, ½) | A A Y / A A B X Y / A A B X B X Y | A beam from the hands, at once (no travel): shoves and hurts everyone along it. Length 6 / 8 / 10.5, width 0.35 / 0.55 / 0.8, knockback 10 / 15 / 19 (the RB shove is 7.5). Props stop it. From level 2 the ground heaves up along both sides of it as it goes (bumps, hills at level 3), throwing enemies out sideways. |
+| **Push** | B X (½, ½) | A A Y / A A B X Y / A A B X B X Y | A beam from the hands, at once (no travel): shoves and hurts everyone along it. Length 6 / 8 / 10.5, width 0.35 / 0.55 / 0.8, knockback 10 / 15 / 19 (the RB shove is 7.5). Props stop it. From level 2 the ground heaves up along both sides of it as it goes: one long ridge per side (a bump, a hill at level 3) whose front races along the beam, throwing enemies out sideways. |
 | Shockwave | X X (1, 1) | – / A A X X Y / A A X X X X Y | Blast around the caster pushing every enemy away. Radius 2.4 / 3.4 / 4.4, force ×0.8 / ×1 / ×1.2. |
 
 ## Earth: X Y … X (Y ½ after X, X 1 beat after the last note)

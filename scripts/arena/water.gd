@@ -2,7 +2,8 @@ class_name Water
 extends Node3D
 ## Ponds: a water surface over each pond bowl (shaders/water.gdshader) and waterfalls
 ## (shaders/waterfall.gdshader) wherever pond water meets a gap: the island's edge, or a hole
-## (spell-made ones too). Waterfalls are rebuilt whenever a hole finishes opening or closing.
+## (spell-made ones too). A pond's waterfalls are rebuilt whenever a hole near it finishes
+## opening or closing. In the endless field ponds come and go (Arena.ponds_changed).
 ##
 ## The water surface is one flat quad per pond at Arena.WATER_LEVEL; the shader works out
 ## everything else analytically from the shared ground functions (depth, shore, gaps).
@@ -19,9 +20,9 @@ const RINGS := 14
 var arena: Arena
 var _surface_mat: ShaderMaterial
 var _fall_mat: ShaderMaterial
-var _falls: MeshInstance3D
-# Lip points for spray: [position, outward direction].
-var _lips: Array = []
+# Per pond id: { surface: MeshInstance3D, falls: MeshInstance3D (or null), lips: Array of
+# [position, outward direction] for spray }.
+var _ponds := {}
 var _spray := 0.0
 
 
@@ -29,15 +30,35 @@ func rebuild_from_arena(a: Arena) -> void:
 	arena = a
 	for c in get_children():
 		c.queue_free()
-	_falls = null
-	_lips.clear()
-	if arena.ponds.is_empty():
-		return
-	_surface_mat = ShaderMaterial.new()
-	_surface_mat.shader = WATER_SHADER
-	_fall_mat = ShaderMaterial.new()
-	_fall_mat.shader = FALL_SHADER
+	_ponds.clear()
+	if not _surface_mat:
+		_surface_mat = ShaderMaterial.new()
+		_surface_mat.shader = WATER_SHADER
+		_fall_mat = ShaderMaterial.new()
+		_fall_mat.shader = FALL_SHADER
+	if not arena.hole_opened.is_connected(_on_hole_changed):
+		arena.hole_opened.connect(_on_hole_changed)
+		arena.hole_closed.connect(_on_hole_changed)
+		arena.ponds_changed.connect(sync)
+	sync()
+
+
+## Adds water for new ponds, removes it for ponds that are gone.
+func sync() -> void:
+	var live := {}
 	for q in arena.ponds:
+		live[q.id] = q
+	for id in _ponds.keys():
+		if not live.has(id):
+			var e: Dictionary = _ponds[id]
+			e.surface.queue_free()
+			if e.falls:
+				e.falls.queue_free()
+			_ponds.erase(id)
+	for id in live:
+		if _ponds.has(id):
+			continue
+		var q: Dictionary = live[id]
 		var quad := QuadMesh.new()
 		quad.orientation = PlaneMesh.FACE_Y
 		quad.size = Vector2.ONE * q.radius * 2.4
@@ -47,73 +68,72 @@ func rebuild_from_arena(a: Arena) -> void:
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		add_child(mi)
 		mi.position = Vector3(q.center.x, Arena.WATER_LEVEL, q.center.y)
-	if not arena.hole_opened.is_connected(_on_hole_changed):
-		arena.hole_opened.connect(_on_hole_changed)
-		arena.hole_closed.connect(_on_hole_changed)
-	_rebuild_falls()
+		_ponds[id] = {"surface": mi, "falls": null, "lips": []}
+		_rebuild_falls(q)
 
 
 ## Only holes reaching a pond change its waterfalls.
 func _on_hole_changed(h: Dictionary) -> void:
 	for q in arena.ponds:
 		if (h.center as Vector2).distance_to(q.center) < q.radius * 1.2 + h.radius + arena.layout.hole_wobble + 0.2:
-			_rebuild_falls()
-			return
+			_rebuild_falls(q)
 
 
-## Traces the zero line of the ground SDF (marching squares) where it runs through pond
+## Traces the zero line of the ground SDF (marching squares) where it runs through pond `q`'s
 ## water, and hangs a falling ribbon from it.
-func _rebuild_falls() -> void:
-	if not arena or arena.ponds.is_empty():
+func _rebuild_falls(q: Dictionary) -> void:
+	if not _ponds.has(q.id):
 		return
-	if _falls:
-		_falls.queue_free()
-		_falls = null
-	_lips.clear()
+	var entry: Dictionary = _ponds[q.id]
+	if entry.falls:
+		entry.falls.queue_free()
+		entry.falls = null
+	var lips: Array = []
+	var r: float = q.radius * 1.2
+	var o: Vector2 = q.center - Vector2(r, r)
+	var n := int(ceil(r * 2.0 / STEP))
+	# Ground SDF over the pond's box, with only the holes that reach it.
+	var near: Array[Dictionary] = []
+	for h in arena.holes:
+		if h.scale > 0.02 and (h.center as Vector2).distance_to(q.center) < r + (h.radius + arena.layout.hole_wobble) * h.scale + 0.2:
+			near.append(h)
+	var sdf := PackedFloat32Array()
+	sdf.resize((n + 1) * (n + 1))
+	for j in n + 1:
+		for i in n + 1:
+			var p := o + Vector2(i, j) * STEP
+			var d := arena.island_sdf(p)
+			for h in near:
+				d = maxf(d, -arena.hole_sdf(p, h))
+			sdf[j * (n + 1) + i] = d
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var count := 0
-	for q in arena.ponds:
-		var r: float = q.radius * 1.2
-		var o: Vector2 = q.center - Vector2(r, r)
-		var n := int(ceil(r * 2.0 / STEP))
-		# Ground SDF over the pond's box, with only the holes that reach it.
-		var near: Array[Dictionary] = []
-		for h in arena.holes:
-			if h.scale > 0.02 and (h.center as Vector2).distance_to(q.center) < r + (h.radius + arena.layout.hole_wobble) * h.scale + 0.2:
-				near.append(h)
-		var sdf := PackedFloat32Array()
-		sdf.resize((n + 1) * (n + 1))
-		for j in n + 1:
-			for i in n + 1:
-				var p := o + Vector2(i, j) * STEP
-				var d := arena.island_sdf(p)
-				for h in near:
-					d = maxf(d, -arena.hole_sdf(p, h))
-				sdf[j * (n + 1) + i] = d
-		for j in n:
-			for i in n:
-				var pts := _cell_crossings(sdf, n + 1, i, j, o)
-				for k in range(0, pts.size() - 1, 2):
-					var a: Vector2 = pts[k]
-					var b: Vector2 = pts[k + 1]
-					# Only where there is water on the solid side of the lip.
-					var mid := (a + b) * 0.5
-					var inward := -arena.ground_gradient(mid)
-					if arena.water_depth(mid + inward * 0.12) <= 0.0:
-						continue
-					_ribbon(st, a, b)
-					count += 1
-					if count % 3 == 0:
-						_lips.append([Vector3(mid.x, Arena.WATER_LEVEL, mid.y), Vector3(-inward.x, 0.0, -inward.y)])
+	for j in n:
+		for i in n:
+			var pts := _cell_crossings(sdf, n + 1, i, j, o)
+			for k in range(0, pts.size() - 1, 2):
+				var a: Vector2 = pts[k]
+				var b: Vector2 = pts[k + 1]
+				# Only where there is water on the solid side of the lip.
+				var mid := (a + b) * 0.5
+				var inward := -arena.ground_gradient(mid)
+				if arena.water_depth(mid + inward * 0.12) <= 0.0:
+					continue
+				_ribbon(st, a, b)
+				count += 1
+				if count % 3 == 0:
+					lips.append([Vector3(mid.x, Arena.WATER_LEVEL, mid.y), Vector3(-inward.x, 0.0, -inward.y)])
+	entry.lips = lips
 	if count == 0:
 		return
-	_falls = MeshInstance3D.new()
-	_falls.name = "Waterfalls"
-	_falls.mesh = st.commit()
-	_falls.material_override = _fall_mat
-	_falls.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(_falls)
+	var falls := MeshInstance3D.new()
+	falls.name = "Waterfalls"
+	falls.mesh = st.commit()
+	falls.material_override = _fall_mat
+	falls.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(falls)
+	entry.falls = falls
 
 
 ## Zero crossings of the SDF on the edges of cell (i, j), paired into segments.
@@ -158,13 +178,18 @@ func _ribbon(st: SurfaceTool, a: Vector2, b: Vector2) -> void:
 
 func _process(delta: float) -> void:
 	var fx := get_node_or_null("../../Fx") as FxSprites
-	if _lips.is_empty() or not fx:
+	if not fx:
 		return
 	_spray -= delta
 	if _spray > 0.0:
 		return
 	_spray = 0.08
-	var lip: Array = _lips[randi() % _lips.size()]
+	var all: Array = []
+	for id in _ponds:
+		all.append_array(_ponds[id].lips)
+	if all.is_empty():
+		return
+	var lip: Array = all[randi() % all.size()]
 	var p: Vector3 = lip[0]
 	var out: Vector3 = lip[1]
 	fx.spawn(p + out * 0.05, out * randf_range(0.4, 1.0) + Vector3.UP * randf_range(0.3, 0.9), 0.35,

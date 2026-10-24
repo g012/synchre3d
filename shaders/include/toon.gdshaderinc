@@ -26,6 +26,7 @@ global uniform vec4 arena_sdf_rect;
 //   row 0: hole (center.x, center.z, radius, scale)   row 1: (ph0, ph1, wobble, id)
 //   row 2: mound (center.x, center.z, radius, height) row 3: (ph0, ph1, sharpness, 0)
 //   row 4: pond (center.x, center.z, radius, depth)   row 5: (ph0, ph1, 0, 0)
+//   row 6: mound spine end (end.x, end.z, 0, 0): a ridge's far end, else its center
 global uniform sampler2D arena_features : filter_nearest, repeat_disable;
 global uniform int arena_hole_count;
 global uniform int arena_mound_count;
@@ -165,6 +166,7 @@ vec3 arena_pond(vec2 xz) {
 }
 
 // Ground height and slope at `xz`: vec3(height, dh/dx, dh/dz). Mirrors Arena.height_at();
+// mounds are measured from their spine (Arena.mound_offset), so ridges work the same way;
 // the slope is the analytic radial derivative of the tallest mound (normals only), plus the
 // pond bowl's.
 vec3 arena_height(vec2 xz) {
@@ -176,7 +178,10 @@ vec3 arena_height(vec2 xz) {
 	vec2 grad = vec2(0.0);
 	for (int i = 0; i < arena_mound_count; i++) {
 		vec4 a = texelFetch(arena_features, ivec2(i, 2), 0);
-		vec2 d = xz - a.xy;
+		// Distance to the mound's spine: its center, or a ridge's segment center-end.
+		vec2 ab = texelFetch(arena_features, ivec2(i, 6), 0).xy - a.xy;
+		float ab2 = dot(ab, ab);
+		vec2 d = xz - (ab2 > 1e-6 ? a.xy + ab * clamp(dot(xz - a.xy, ab) / ab2, 0.0, 1.0) : a.xy);
 		float l = length(d);
 		if (a.w <= 0.0 || l >= a.z * 1.17) {
 			continue;
