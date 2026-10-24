@@ -69,6 +69,9 @@ Project Settings.
 Keyboard keys are bound by physical position, so they work the same on AZERTY. In 1-player
 mode, either keyboard side and either pad control Pip.
 
+A jump (about 0.9 high) clears rocks, stumps and bushes: every prop's collider is as tall as
+the prop itself, so only trees block a jump. You can also land on top of a rock.
+
 Moving, jumping and chanting are fully independent. You can run, change direction, jump over
 a hole or get knocked back in the middle of an incantation, and finish a spell in mid-air.
 There is no "cast" button and movement is never locked while casting.

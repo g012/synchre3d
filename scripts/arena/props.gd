@@ -170,12 +170,14 @@ func _place(arena: Arena, scene: PackedScene, p: Vector3, rng: RandomNumberGener
 		var body := StaticBody3D.new()
 		body.collision_layer = Arena.LAYER_OBSTACLES
 		body.collision_mask = 0
+		# As tall as the prop itself: low ones (rocks, stumps, small bushes) can be jumped over.
+		var height := _prop_height(node)
 		var shape := CylinderShape3D.new()
 		shape.radius = collider_radius
-		shape.height = 2.0
+		shape.height = height
 		var cs := CollisionShape3D.new()
 		cs.shape = shape
-		cs.position.y = 1.0
+		cs.position.y = height * 0.5
 		body.add_child(cs)
 		body.position = node.position
 		parent.add_child(body)
@@ -185,6 +187,15 @@ func _place(arena: Arena, scene: PackedScene, p: Vector3, rng: RandomNumberGener
 		# Small decorations only keep grass from growing through them.
 		(cell.decor if not cell.is_empty() else arena.decor_footprints).append(Vector3(p.x, p.y, 0.25 * p.z))
 	return node
+
+
+## Height of a placed prop's meshes above its base (at least 0.2).
+func _prop_height(node: Node3D) -> float:
+	var top := 0.2
+	for mi in ToonMaterials.mesh_instances(node):
+		var box := mi.global_transform * mi.get_aabb() if mi.is_inside_tree() else mi.transform * mi.get_aabb()
+		top = maxf(top, box.end.y - (node.global_position.y if node.is_inside_tree() else node.position.y))
+	return top
 
 
 # ---------------------------------------------------------------- endless field
