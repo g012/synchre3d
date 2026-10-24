@@ -111,6 +111,11 @@ func vanish(pos: Vector3) -> void:
 		spawn(pos, Vector3(cos(a), randf_range(0.5, 1.5), sin(a)) * 2.0, 0.5, TILE_SPARK, 6, 2, 3.0, 1.0, -2.0, 3.0)
 
 
+## Removes every live sprite (new round).
+func clear() -> void:
+	_life.fill(0.0)
+
+
 func _process(delta: float) -> void:
 	var count := 0
 	for i in MAX:

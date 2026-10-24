@@ -117,20 +117,24 @@ func _draw() -> void:
 
 	# --- tempo row
 	_text(Vector2(4, 9), title, Color.WHITE)
+	# Tempo readout after the title, whatever its width ("P1", "CPU"...).
+	var bpm_x := 4.0 + ceilf(font.get_string_size(title, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x) + 5.0
 	if clock and clock.running:
-		_text(Vector2(18, 9), "%d BPM" % roundi(clock.current_bpm()), Color.WHITE)
+		var bpm_text := "%d BPM" % roundi(clock.current_bpm())
+		_text(Vector2(bpm_x, 9), bpm_text, Color.WHITE)
+		var lx := bpm_x + ceilf(font.get_string_size(bpm_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x) + 6.0
 		var b := clock.beats_now()
 		var beat := floori(b)
 		var phase := b - beat
 		for k in 4:
 			var lit := posmod(beat, 4) == k
 			var c := PERFECT_COLOR if lit and phase < 0.35 else Color(1, 1, 1, 0.25 if not lit else 0.55)
-			draw_rect(Rect2(64 + k * 7, 4, 4 if k > 0 else 5, 4 if k > 0 else 5), c)
+			draw_rect(Rect2(lx + k * 7, 4, 4 if k > 0 else 5, 4 if k > 0 else 5), c)
 	else:
 		var n := e.count_in_streak()
-		_text(Vector2(18, 9), "TAP 4 BEATS", Color(1, 1, 1, 0.8))
+		_text(Vector2(bpm_x, 9), "TAP 4 BEATS", Color(1, 1, 1, 0.8))
 		for k in 4:
-			draw_rect(Rect2(84 + k * 5, 4, 3, 3), PERFECT_COLOR if k < n else Color(1, 1, 1, 0.2))
+			draw_rect(Rect2(bpm_x + 66 + k * 5, 4, 3, 3), PERFECT_COLOR if k < n else Color(1, 1, 1, 0.2))
 
 	# Aim mode: auto or manual, and strafing while LT is held.
 	var ch := caster.character

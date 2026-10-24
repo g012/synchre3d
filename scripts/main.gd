@@ -54,6 +54,8 @@ var phase := Phase.MENU
 var survival: Survival
 var tutorial: Tutorial
 var _menu_index := 0
+var _nav_v := MenuNav.new()
+var _nav_h := MenuNav.new()
 var paused := false
 var _pause_index := 0
 var _camera_home := Vector3.ZERO
@@ -128,6 +130,7 @@ func enter_menu() -> void:
 	else:
 		arena.reset_ground()
 	spells.clear()
+	fx.clear()
 	for f in fighters:
 		_bench(f, true)
 	camera.targets = []
@@ -269,7 +272,8 @@ func _set_human(i: int, human: bool) -> void:
 		caster.effects = spells
 		caster.fx = fx
 		caster.metronome = false # the shared BeatClock keeps time
-		caster.voice_pitch = 1.0 if i == 0 else 1.12
+		# Player 2 (or the CPU) sings a fifth (7 semitones) above player 1.
+		caster.voice_pitch = 1.0 if i == 0 else pow(2.0, 7.0 / 12.0)
 		caster.listening = false
 		fighters[i].add_child(caster)
 		casters[i] = caster
@@ -403,6 +407,7 @@ func _reset_arena_and_spawn() -> void:
 	if not arena.endless:
 		arena.reset_ground()
 	spells.clear()
+	fx.clear()
 	for c in casters:
 		if c:
 			c.cancel()
@@ -504,7 +509,9 @@ func _update_survival_status() -> void:
 	hud.set_status("HP %d    %d:%02d    KILLS %d" % [ceili(pip.hp), t / 60, t % 60, survival.kills], hp_color)
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	_nav_v.update(_nav_axis(["ui_up", "p1_up", "p2_up"], ["ui_down", "p1_down", "p2_down"]), delta)
+	_nav_h.update(_nav_axis(["ui_left", "p1_left", "p2_left"], ["ui_right", "p1_right", "p2_right"]), delta)
 	if mode == Mode.MENU:
 		var moved := _menu_move()
 		if moved != 0:
@@ -514,12 +521,8 @@ func _process(_delta: float) -> void:
 			_start_mode(MENU_MODES[_menu_index])
 	elif paused and hud.spell_book_open():
 		# Spell book page: left / right turn pages; B (A too) back to the pause menu.
-		for a in ["ui_left", "p1_left", "p2_left"]:
-			if Input.is_action_just_pressed(a):
-				hud.turn_spell_book(-1)
-		for a in ["ui_right", "p1_right", "p2_right"]:
-			if Input.is_action_just_pressed(a):
-				hud.turn_spell_book(1)
+		if _nav_h.step != 0:
+			hud.turn_spell_book(_nav_h.step)
 		for a in ["ui_cancel", "p1_syl_b", "p2_syl_b", "ui_accept", "p1_syl_a", "p2_syl_a"]:
 			if Input.is_action_just_pressed(a):
 				_close_spell_book()
@@ -539,14 +542,57 @@ func _process(_delta: float) -> void:
 
 
 func _menu_move() -> int:
-	var moved := 0
-	for a in ["ui_up", "p1_up", "p2_up"]:
-		if Input.is_action_just_pressed(a):
-			moved = -1
-	for a in ["ui_down", "p1_down", "p2_down"]:
-		if Input.is_action_just_pressed(a):
-			moved = 1
-	return moved
+	return _nav_v.step
+
+
+## Strongest of the actions pushing each way: -1 .. 1 (stick, D-pad, keys alike).
+func _nav_axis(negative: Array, positive: Array) -> float:
+	var v := 0.0
+	for a in negative:
+		v = minf(v, -Input.get_action_raw_strength(a))
+	for a in positive:
+		if Input.get_action_raw_strength(a) > absf(v):
+			v = Input.get_action_raw_strength(a)
+	return v
+
+
+## Menu navigation on one axis, steady with an analog stick: one step when pushed past
+## PRESS (and back under RELEASE first: hysteresis), a short guard against the stick bouncing
+## past the centre on release, and auto-repeat while held.
+class MenuNav:
+	const PRESS := 0.6
+	const RELEASE := 0.3
+	const BOUNCE := 0.15
+	const REPEAT_DELAY := 0.45
+	const REPEAT_EVERY := 0.18
+	## -1, 0 or 1 on the frame a step happens.
+	var step := 0
+	var _held := 0
+	var _timer := 0.0
+	var _guard := 0.0
+
+	func update(v: float, delta: float) -> void:
+		step = 0
+		_guard = maxf(_guard - delta, 0.0)
+		var dir := 0
+		if v > PRESS:
+			dir = 1
+		elif v < -PRESS:
+			dir = -1
+		if _held != 0:
+			if absf(v) < RELEASE or signf(v) != _held:
+				_held = 0
+				_guard = BOUNCE
+				return
+			_timer -= delta
+			if _timer <= 0.0:
+				_timer = REPEAT_EVERY
+				step = _held
+			return
+		if dir != 0 and _guard <= 0.0:
+			_held = dir
+			_timer = REPEAT_DELAY
+			step = dir
 
 
 func _menu_accept(with_start: bool) -> bool:

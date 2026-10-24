@@ -98,6 +98,8 @@ func relocate(node: Node3D, xz: Vector2) -> void:
 		if e.node != node:
 			continue
 		var old: Vector2 = e.xz
+		if not e.has("home"):
+			e.home = old
 		e.xz = xz
 		# Into a pond: it floats at the surface, delighted.
 		var wet := _arena.water_depth(xz) > 0.05
@@ -115,6 +117,14 @@ func relocate(node: Node3D, xz: Vector2) -> void:
 					list[i] = Vector3(xz.x, xz.y, list[i].z)
 		return
 	node.global_position = Vector3(xz.x, _arena.height_at(xz), xz.y)
+
+
+## Puts every decoration a spell moved back home (new round), dry and calm again.
+func restore_decor() -> void:
+	for e in _entries:
+		if e.has("home") and is_instance_valid(e.node):
+			relocate(e.node, e.home)
+			e.erase("home")
 
 
 ## Lifts props (and their colliders and leaf cards) onto the current ground height.

@@ -354,6 +354,10 @@ func reset_ground() -> void:
 	_refresh_collision(Rect2(_hm_origin, Vector2(_hm_cells) * HM_SPACING))
 	if had_mounds:
 		ground_changed.emit(sdf_rect)
+	# Decorations moved by spells (a swapped flower) go back where they were.
+	var props := get_node_or_null("Props")
+	if props and props.has_method("restore_decor"):
+		props.restore_decor()
 
 
 func _add_hole(center: Vector2, radius: float, scale: float, dynamic: bool, ph0: float, ph1: float) -> Dictionary:
