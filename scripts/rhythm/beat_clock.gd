@@ -165,8 +165,8 @@ func _process(_delta: float) -> void:
 	if idx != _last:
 		_last = idx
 		beat.emit(idx)
-		# Accent on the downbeat of each bar.
-		_play(TICK, 1.25 if posmod(idx, 4) == 0 else 1.0)
+		# Every beat sounds the same: spells start on any beat, there is no bar.
+		_play(TICK, 1.0)
 
 
 func _play(stream: AudioStream, pitch: float) -> void:

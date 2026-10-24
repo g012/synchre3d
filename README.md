@@ -151,13 +151,14 @@ console). The camera follows both fighters and zooms out a little when they are 
    it as the chant rules their spell out, and once one spell is left the glow morphs into
    its color. It only fizzles when no spell can continue the chant.
 
-   A **ring at your feet** pulses on every beat (a wider wave on each bar's first beat), so
+   A **ring at your feet** pulses on every beat, so
    you can keep time without looking away from the fight, and shows the chant in progress:
    one pip per syllable, clockwise from the top, lit in the button's color once validated,
    faint for the ones still to come. The CPU has one too.
 
-   The shared beat is shown once at the top, under the score: the tempo and four squares
-   (one per beat of the bar, the first a bit bigger) lighting up yellow on each beat.
+   The shared beat is shown once at the top, under the score: the tempo and a circle that
+   swells and flashes yellow on every beat. Spells start on any beat, so there is no bar:
+   every metronome tick sounds the same.
 
    The rhythm panel (bottom-left; P2 bottom-right; the CPU's is compact) shows:
    - your last syllables with a timing tick for each: centred = on time, shifted left or blue

@@ -67,7 +67,6 @@ void fragment() {
 	bool has_beat = beat_time >= 0.0;
 	float ph = has_beat ? fract(beat_time) : 0.5;
 	float hit = has_beat ? pow(1.0 - ph, 3.0) : 0.0;
-	bool downbeat = has_beat && mod(floor(beat_time), 4.0) < 0.5;
 	vec3 c = vec3(0.0);
 	bool on = false;
 
@@ -77,10 +76,10 @@ void fragment() {
 		c = palette_color(palette_index, hit > 0.35 ? 3 : 2);
 		on = true;
 	}
-	// Pulse: a wave leaving the ring on each beat (wider on the bar's downbeat).
-	float wave_r = RING + ph * (downbeat ? 0.42 : 0.28);
+	// Pulse: a wave leaving the ring on each beat (all beats alike).
+	float wave_r = RING + ph * 0.32;
 	if (has_beat && ph < 0.45 && abs(r - wave_r) < 0.025 && dith < 1.0 - ph * 2.0) {
-		c = palette_color(downbeat ? 1 : palette_index, 3);
+		c = palette_color(palette_index, 3);
 		on = true;
 	}
 	// Syllable pips around the ring.
