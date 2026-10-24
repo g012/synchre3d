@@ -29,6 +29,8 @@ var _menu_items: Array[Label] = []
 var _tutorial_card: TutorialCard
 var _spell_book: SpellBookView
 var _beat_bar: BeatBar
+var _dialogue: DialogueBox
+var _quest: QuestMarker
 var _menu_footer: Label
 
 
@@ -64,6 +66,15 @@ func _ready() -> void:
 	_beat_bar.setup(_font)
 	_root.add_child(_beat_bar)
 
+	# Story: the quest line with its compass (top left) and the dialogue box (bottom).
+	_quest = QuestMarker.new()
+	_quest.setup(_font)
+	_quest.visible = false
+	_root.add_child(_quest)
+	_dialogue = DialogueBox.new()
+	_root.add_child(_dialogue)
+	_dialogue.setup(_font, palette_color(28, 3))
+
 	# Survival: health, time and kills instead of names and score.
 	_status = _label(16)
 	_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -89,7 +100,7 @@ func _ready() -> void:
 	var gap := Control.new()
 	gap.custom_minimum_size = Vector2(0, 10)
 	_menu.add_child(gap)
-	for i in 4:
+	for i in 6:
 		var l := _label(16)
 		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		_menu.add_child(l)
@@ -154,6 +165,10 @@ func _layout() -> void:
 		_menu_plate.size = Vector2(360, mh + 20)
 		_menu_plate.position = Vector2(floorf((s.x - 360) * 0.5), _menu.position.y - 10)
 	_mode.position = Vector2(6, 6)
+	if _quest:
+		_quest.position = Vector2(6, 18)
+	if _dialogue:
+		_dialogue.position = Vector2(floorf((s.x - _dialogue.size.x) * 0.5), s.y - 18 - _dialogue.size.y - 52)
 	for i in _panels.size():
 		var p := _panels[i]
 		var x := 6.0 if i == 0 else s.x - p.size.x - 6.0
@@ -174,7 +189,10 @@ func set_score(a: int, b: int) -> void:
 ## `mode`: "menu", "cpu", "human" or "survival".
 func set_mode(mode: String) -> void:
 	_top.visible = mode == "cpu" or mode == "human"
-	_status.visible = mode == "survival"
+	_status.visible = mode == "survival" or mode == "story"
+	_quest.visible = mode == "story"
+	if mode != "story":
+		_dialogue.close()
 	_hint.visible = mode != "menu"
 	_mode.visible = mode != "menu"
 	match mode:
@@ -184,12 +202,38 @@ func set_mode(mode: String) -> void:
 		"cpu":
 			_mode.text = "DUEL VS CPU"
 			_hint.text = "STICK/WASD MOVE  ABXY (KLJI) CHANT  RT/SPC JUMP  LB/SHIFT DASH  RB/E SHOVE  LT/Q STRAFE  START PAUSE"
+		"story":
+			_mode.text = "STORY"
+			_hint.text = "STICK/WASD MOVE  ABXY (KLJI) CHANT  RT/SPC JUMP  LB/SHIFT DASH  RB/E SHOVE  LT/Q STRAFE  START PAUSE"
 		"tutorial":
 			_mode.text = "TUTORIAL"
 			_hint.text = "STICK/WASD MOVE  ABXY (KLJI) CHANT  RT/SPC JUMP  LB/SHIFT DASH  RB/E SHOVE  LT/Q STRAFE  START PAUSE"
 		"survival":
 			_mode.text = "SURVIVAL"
 			_hint.text = "STICK/WASD MOVE  ABXY (KLJI) CHANT  RT/SPC JUMP  LB/SHIFT DASH  RB/E SHOVE  LT/Q STRAFE  START PAUSE"
+
+
+## Story dialogue: `lines` from `speaker`, one at a time (advance_dialogue), then `done`.
+func show_dialogue(speaker: String, lines: Array, done: Callable) -> void:
+	_dialogue.open(speaker, lines, done)
+	_layout()
+
+
+func dialogue_open() -> bool:
+	return _dialogue.is_open()
+
+
+func advance_dialogue() -> void:
+	_dialogue.advance()
+
+
+func close_dialogue() -> void:
+	_dialogue.close()
+
+
+## Story quest line and compass (dist < 0: no target).
+func set_quest(text: String, direction: Vector2, dist: float) -> void:
+	_quest.set_quest(text, direction, dist)
 
 
 ## Shows the spell book page (pause menu), or hides it with null.

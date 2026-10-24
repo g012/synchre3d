@@ -47,8 +47,8 @@ func _draw() -> void:
 	draw_rect(Rect2(Vector2.ZERO, size), Color(1, 1, 1, 0.15), false, 1.0)
 	_text(Vector2(6, 11), "LESSON %d/%d" % [tutorial.index + 1, tutorial.lessons.size()], Color(1, 1, 1, 0.6))
 	_text(Vector2(84, 11), "%s  LEVEL %d" % [spell.display_name.to_upper(), l.level], _palette.get_pixel(spell.palette_index, 3))
-	for k in Tutorial.SUCCESSES:
-		var r := Rect2(W - 8 - (Tutorial.SUCCESSES - k) * 11, 4, 8, 8)
+	for k in tutorial.successes_needed:
+		var r := Rect2(W - 8 - (tutorial.successes_needed - k) * 11, 4, 8, 8)
 		if k < tutorial.successes:
 			draw_rect(r, Color("f6d65a"))
 		draw_rect(r, Color(1, 1, 1, 0.6), false, 1.0)

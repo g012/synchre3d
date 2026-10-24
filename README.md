@@ -21,6 +21,17 @@ than the Push spell. More spells wait in the [spell book](docs/spellbook.md).
 
 The game opens on a **menu** (stick / D-pad / arrows to choose, A / Enter / Start to pick):
 
+- **Story.** An old-school JRPG adventure. Pip wakes up with nothing but the shove (RB);
+  Elder Bloom, an old flower, sends him to five shrines hidden across a fixed world (the
+  same holes, ponds and trees every time). A quest line with a compass arrow and distance
+  (top left) points to the next shrine. Each shrine is guarded by a camp of grunts; once
+  they are gone, its sage (a big dancing flower) teaches one song through listen-and-repeat
+  lessons (2 good casts per level), and the spell joins Pip's book: the rhythm panel and the
+  pause spell book only show the songs learnt. Order: Push (north), Swap (east), Quicken
+  (south-east), Shockwave (south-west), Minion (far west). Grunts also wander the world and
+  chase Pip when he comes close; away from them he slowly heals. Falling or losing all
+  health sends him back to the last shrine, songs kept. Progress is saved after each song
+  (`user://story.json`): the menu offers Continue and New Game.
 - **Single player: survival.** Pip alone on an endless field dotted with holes, ponds, trees, bushes, rocks and
   dancing flowers. Enemies
   (shadowy mushroom grunts) keep coming from just off screen and rush you, forever: more of

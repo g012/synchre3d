@@ -11,6 +11,12 @@ const LOOKAHEAD := 0.9
 
 var arena: Arena
 var target: ArenaCharacter
+## Only chases the target within this distance (story wanderers and guards); otherwise it
+## ambles around `home`.
+var aggro_radius := INF
+var home := Vector2.ZERO
+var _wander := Vector2.ZERO
+var _wander_timer := 0.0
 var _move := Vector3.ZERO
 var _dir := Vector2.ZERO
 var _think := 0.0
@@ -35,6 +41,9 @@ func update(c: ArenaCharacter, delta: float) -> void:
 	var my := Vector2(c.global_position.x, c.global_position.z)
 	var to := Vector2(target.global_position.x, target.global_position.z) - my
 	var dist := to.length()
+	if dist > aggro_radius:
+		_amble(c, my, delta)
+		return
 	var to_n := to / maxf(dist, 0.001)
 	_think -= delta
 	if _think <= 0.0:
@@ -62,6 +71,21 @@ func update(c: ArenaCharacter, delta: float) -> void:
 			_push_delay = -1.0
 	else:
 		_push_delay = -1.0
+
+
+## Out of reach of the target: stroll slowly between random spots near home.
+func _amble(c: ArenaCharacter, my: Vector2, delta: float) -> void:
+	_push_delay = -1.0
+	_wander_timer -= delta
+	if _wander_timer <= 0.0 or my.distance_to(_wander) < 0.4:
+		_wander_timer = _rng.randf_range(2.0, 4.0)
+		_wander = home + Vector2.from_angle(_rng.randf() * TAU) * _rng.randf_range(0.0, 3.0)
+	var d := _wander - my
+	var q := my + d.normalized() * LOOKAHEAD
+	if d.length() < 0.4 or arena.ground_sdf(q) > -0.25 or _blocked(q):
+		_move = Vector3.ZERO
+		return
+	_move = Vector3(d.x, 0.0, d.y).normalized() * 0.3
 
 
 func _blocked(p: Vector2) -> bool:

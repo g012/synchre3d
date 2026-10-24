@@ -7,11 +7,15 @@ extends Node3D
 ## come back when they are knocked away or fall.
 
 signal changed
+## The last lesson was passed (story mode moves on).
+signal finished
 
 const CHARACTER_SCENE := preload("res://scenes/character.tscn")
 const DUMMY_MODEL := preload("res://assets/models/mog.glb")
 ## Good casts needed to finish a lesson.
 const SUCCESSES := 3
+## Good casts needed per lesson (story mode asks for fewer).
+var successes_needed := SUCCESSES
 ## Dummies: distance in front of the player, and spacing.
 const DUMMY_DISTANCE := 4.0
 const DUMMY_SPACING := 1.6
@@ -44,9 +48,12 @@ var _dummies: Array[ArenaCharacter] = []
 var _check := 0.0
 
 
-func start() -> void:
+## Lessons for every spell in play, or only for `only` (story mode: the spell just learnt).
+func start(only: SpellDefinition = null) -> void:
 	lessons.clear()
 	for s in book.active():
+		if only and s != only:
+			continue
 		for level in range(book.min_level(s), s.max_level + 1):
 			lessons.append({"spell": s, "level": level, "pattern": s.to_pattern(level)})
 	index = 0
@@ -143,6 +150,7 @@ func _process(delta: float) -> void:
 				else:
 					step = Step.PLAY
 					message = "ALL LESSONS DONE!  KEEP PRACTISING"
+					finished.emit()
 	_check -= delta
 	if _check <= 0.0:
 		_check = 1.0
@@ -158,7 +166,7 @@ func _on_cast(spell: SpellDefinition, level: int, precision: float) -> void:
 		var grade := "PERFECT" if precision > 0.85 else ("GOOD" if precision > 0.6 else "OK")
 		message = "%s!  %d%%" % [grade, roundi(precision * 100.0)]
 		message_color = Color("f6d65a") if precision > 0.85 else Color(1, 1, 1)
-		if successes >= SUCCESSES:
+		if successes >= successes_needed:
 			step = Step.DONE
 			_done_timer = 1.8
 			message = "LESSON DONE!  %d%%" % roundi(precision * 100.0)

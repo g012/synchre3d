@@ -83,6 +83,10 @@ const GAP_SDF := 0.15
 var endless := false
 ## Endless mode: world point (x, z) the streamed ground is centred on.
 var focus := Vector2.ZERO
+## Endless mode: fixed world seed (story mode: the same world every time), or -1 for random.
+var endless_seed := -1
+## Endless mode: circles (x, z, radius) kept free of holes, ponds and props (story shrines).
+var clear_zones: Array[Vector3] = []
 ## The layout actually built (config scaled / randomized). Read this, not `config`.
 var layout: ArenaConfig
 var layout_seed := 0
@@ -1257,7 +1261,7 @@ var _pond_cells := {}
 
 
 func _rebuild_endless() -> void:
-	layout_seed = randi()
+	layout_seed = endless_seed if endless_seed >= 0 else randi()
 	_rng.seed = layout_seed
 	layout = config.duplicate(true) as ArenaConfig
 	layout.radius = Vector2(ENDLESS_EXTENT, ENDLESS_EXTENT)
@@ -1418,16 +1422,23 @@ func _cell_pond(c: Vector2i) -> Dictionary:
 	var r := rng.randf_range(layout.pond_radius.x, layout.pond_radius.y)
 	var m := r + 1.0
 	var p := Vector2(c) * POND_CELL + Vector2(rng.randf_range(m, POND_CELL - m), rng.randf_range(m, POND_CELL - m))
-	if p.length() < SAFE_START + r:
+	if p.length() < SAFE_START + r or _in_clear_zone(p, r * 1.15):
 		return {}
 	return {"center": p, "radius": r, "depth": layout.pond_depth, "ph0": rng.randf() * TAU, "ph1": rng.randf() * TAU}
+
+
+func _in_clear_zone(p: Vector2, radius: float) -> bool:
+	for z in clear_zones:
+		if p.distance_to(Vector2(z.x, z.y)) < z.z + radius:
+			return true
+	return false
 
 
 ## Endless field: whether a prop of footprint `radius` at `p` keeps clear of every hole and
 ## pond that is (or will be) generated around it, and of the start. Uses the deterministic
 ## cell generators, so it holds before those cells have streamed in.
 func endless_spot_clear(p: Vector2, radius: float) -> bool:
-	if p.length() < SAFE_START + 1.5:
+	if p.length() < SAFE_START + 1.5 or _in_clear_zone(p, radius):
 		return false
 	var hc := Vector2i(floori(p.x / HOLE_CELL), floori(p.y / HOLE_CELL))
 	for dj in range(-1, 2):
@@ -1463,7 +1474,7 @@ func _cell_holes(c: Vector2i) -> Array[Vector3]:
 		var r := rng.randf_range(0.55, 1.3)
 		var m := r + 0.8
 		var p := Vector2(c) * HOLE_CELL + Vector2(rng.randf_range(m, HOLE_CELL - m), rng.randf_range(m, HOLE_CELL - m))
-		if p.length() < SAFE_START + r:
+		if p.length() < SAFE_START + r or _in_clear_zone(p, r + 0.5):
 			continue
 		var ok := true
 		for o in out:

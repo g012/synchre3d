@@ -7,6 +7,7 @@ extends Node
 ##   Survival director sends enemies, until Pip falls or runs out of health.
 ## * Tutorial: Pip alone on the island with training dummies, one lesson per spell and level
 ##   (see Tutorial).
+## * Story: Pip explores a fixed world, learning spells at shrines (see Story).
 ## Start / Back / Esc pauses (resume, restart, quit to the menu); so does leaving the window.
 ##
 ## Tempo: before the first round player 1 taps four even beats (the original Synchre
@@ -23,11 +24,13 @@ const PIP_MODEL := preload("res://assets/models/pip.glb")
 const MOG_MODEL := preload("res://assets/models/mog.glb")
 const SPELLBOOK := preload("res://assets/spells/spellbook.tres")
 
-enum Mode { MENU, SURVIVAL, TUTORIAL, DUEL_CPU, DUEL_HUMAN }
-enum Phase { MENU, TEMPO, INTRO, FIGHT, ROUND_OVER, RUN, GAME_OVER, LESSON }
+enum Mode { MENU, SURVIVAL, TUTORIAL, DUEL_CPU, DUEL_HUMAN, STORY }
+enum Phase { MENU, TEMPO, INTRO, FIGHT, ROUND_OVER, RUN, GAME_OVER, LESSON, ADVENTURE }
 
 const MENU_ITEMS: Array[String] = ["SINGLE PLAYER - SURVIVAL", "TUTORIAL - LEARN THE SPELLS", "DUEL VS CPU", "DUEL VS HUMAN"]
 const MENU_MODES: Array[Mode] = [Mode.SURVIVAL, Mode.TUTORIAL, Mode.DUEL_CPU, Mode.DUEL_HUMAN]
+## Story: health.
+const STORY_HP := 100.0
 const PAUSE_ITEMS: Array[String] = ["RESUME", "SPELL BOOK", "RESTART", "QUIT TO MENU"]
 ## Survival: Pip's health.
 const SURVIVAL_HP := 100.0
@@ -53,6 +56,11 @@ var fighters: Array[ArenaCharacter] = []
 var phase := Phase.MENU
 var survival: Survival
 var tutorial: Tutorial
+var story: Story
+# Menu entries as shown (story entries depend on a save) and the action of each:
+# a Mode, or "continue" / "new" for the story.
+var _menu_entries: Array = []
+var _story_new := false
 var _menu_index := 0
 var _nav_v := MenuNav.new()
 var _nav_h := MenuNav.new()
@@ -104,6 +112,15 @@ func _ready() -> void:
 	tutorial.camera = camera
 	tutorial.book = SPELLBOOK
 	world.add_child(tutorial)
+	story = Story.new()
+	story.name = "Story"
+	story.arena = arena
+	story.fx = fx
+	story.camera = camera
+	story.hud = hud
+	story.tutorial = tutorial
+	story.full_book = SPELLBOOK
+	world.add_child(story)
 	_camera_home = camera.focus
 	enter_menu()
 
@@ -119,6 +136,10 @@ func enter_menu() -> void:
 	survival.clear()
 	tutorial.stop()
 	hud.set_tutorial(null)
+	story.stop()
+	hud.close_dialogue()
+	if casters[0]:
+		_use_book(SPELLBOOK)
 	beat_clock.stop()
 	for c in casters:
 		if c:
@@ -126,6 +147,8 @@ func enter_menu() -> void:
 			c.cancel()
 	if arena.endless:
 		arena.endless = false
+		arena.endless_seed = -1
+		arena.clear_zones.clear()
 		arena.rebuild()
 	else:
 		arena.reset_ground()
@@ -142,8 +165,19 @@ func enter_menu() -> void:
 
 
 func _show_menu() -> void:
-	hud.show_menu("SYNCHRE", MENU_ITEMS, _menu_index,
-		"STICK / D-PAD: CHOOSE    A / ENTER: START\nIN GAME  R3 / F2: HIDE SPELL SHEETS    BACK: MENU")
+	var labels: Array[String] = []
+	_menu_entries.clear()
+	if Story.has_save():
+		labels.append_array(["STORY - CONTINUE", "STORY - NEW GAME"])
+		_menu_entries.append_array(["continue", "new"])
+	else:
+		labels.append("STORY - NEW GAME")
+		_menu_entries.append("new")
+	labels.append_array(MENU_ITEMS)
+	_menu_entries.append_array(MENU_MODES)
+	_menu_index = clampi(_menu_index, 0, labels.size() - 1)
+	hud.show_menu("SYNCHRE", labels, _menu_index,
+		"STICK / D-PAD: CHOOSE    A / ENTER: START\nIN GAME  R3 / F2: HIDE SPELL SHEETS    START: PAUSE")
 
 
 func _start_mode(m: Mode) -> void:
@@ -152,7 +186,18 @@ func _start_mode(m: Mode) -> void:
 	scores = [0, 0]
 	if m == Mode.SURVIVAL:
 		arena.endless = true
+		arena.endless_seed = -1
+		arena.clear_zones.clear()
 		arena.focus = Vector2.ZERO
+		arena.rebuild()
+		_bench(fighters[0], false)
+		_bench(fighters[1], true)
+	elif m == Mode.STORY:
+		story.setup(_story_new)
+		arena.endless = true
+		arena.endless_seed = Story.WORLD_SEED
+		arena.clear_zones = Story.clear_zones()
+		arena.focus = story.checkpoint()
 		arena.rebuild()
 		_bench(fighters[0], false)
 		_bench(fighters[1], true)
@@ -168,7 +213,14 @@ func _start_mode(m: Mode) -> void:
 
 
 func _solo() -> bool:
-	return mode == Mode.SURVIVAL or mode == Mode.TUTORIAL
+	return mode == Mode.SURVIVAL or mode == Mode.TUTORIAL or mode == Mode.STORY
+
+
+## The book fighter 0 chants from (story: only the songs learnt).
+func _use_book(b: SpellBook) -> void:
+	if casters[0].book != b:
+		casters[0].book = b
+		casters[0].refresh_spells()
 
 
 ## A benched fighter is out of the game: hidden, frozen, untouchable.
@@ -252,12 +304,17 @@ func _apply_solo() -> void:
 	pip.brain = brain
 	pip.auto_aim = false
 	pip.opponent = null
-	pip.max_hp = SURVIVAL_HP if mode == Mode.SURVIVAL else 0.0
+	pip.max_hp = SURVIVAL_HP if mode == Mode.SURVIVAL else (STORY_HP if mode == Mode.STORY else 0.0)
 	# Frozen until the tempo is set (see _start_run, _start_lessons).
 	pip.auto_activate = false
 	if mode == Mode.SURVIVAL:
 		survival.player = pip
-	hud.set_mode("survival" if mode == Mode.SURVIVAL else "tutorial")
+	_use_book(story.book if mode == Mode.STORY else SPELLBOOK)
+	if mode == Mode.STORY:
+		story.player = pip
+		story.caster = casters[0]
+		survival.player = pip # keeps the streamed field centred on Pip
+	hud.set_mode({Mode.SURVIVAL: "survival", Mode.STORY: "story"}.get(mode, "tutorial"))
 	var solo: Array[SpellCaster] = [casters[0]]
 	hud.set_rhythm_panels(solo, ["P1"] as Array[String])
 
@@ -367,6 +424,14 @@ func _start_match() -> void:
 		_start_run(false)
 	elif mode == Mode.TUTORIAL:
 		_start_lessons()
+	elif mode == Mode.STORY:
+		phase = Phase.ADVENTURE
+		phase_time = 0.0
+		var pip := fighters[0]
+		pip.auto_activate = true
+		pip.set_frozen(false)
+		hud.hide_message()
+		story.begin()
 	else:
 		_round_decided = false
 		_start_fight()
@@ -411,8 +476,9 @@ func _reset_arena_and_spawn() -> void:
 	for c in casters:
 		if c:
 			c.cancel()
-	if mode == Mode.SURVIVAL:
-		fighters[0].spawn(Vector3.ZERO, Vector3.FORWARD)
+	if mode == Mode.SURVIVAL or mode == Mode.STORY:
+		var at := story.checkpoint() if mode == Mode.STORY else Vector2.ZERO
+		fighters[0].spawn(Vector3(at.x, 0.0, at.y), Vector3.FORWARD)
 		_update_camera_targets()
 		camera.snap_to_targets()
 		return
@@ -477,6 +543,13 @@ func _on_eliminated(c: ArenaCharacter) -> void:
 		if phase == Phase.RUN:
 			_game_over(c.hp <= 0.0 and c.max_hp > 0.0)
 		return
+	if mode == Mode.STORY:
+		# No game over in the story: back to the last shrine.
+		if c == fighters[0] and phase == Phase.ADVENTURE:
+			get_tree().create_timer(1.2).timeout.connect(func():
+				if mode == Mode.STORY and c.state == ArenaCharacter.State.OUT:
+					story.respawn())
+		return
 	if mode == Mode.TUTORIAL:
 		# No losing in the tutorial: back to the start spot.
 		get_tree().create_timer(0.8).timeout.connect(func():
@@ -509,16 +582,36 @@ func _update_survival_status() -> void:
 	hud.set_status("HP %d    %d:%02d    KILLS %d" % [ceili(pip.hp), t / 60, t % 60, survival.kills], hp_color)
 
 
+func _update_story_hud() -> void:
+	var pip := fighters[0]
+	var hp_color := hud.palette_color(4, 3) if pip.hp < STORY_HP * 0.3 else Color.WHITE
+	# The lesson card takes the top of the screen during a lesson.
+	hud.set_status("" if tutorial.running else "HP %d    SONGS %d/%d" % [ceili(pip.hp), story.stage, Story.SHRINES.size()], hp_color)
+	var q := story.quest()
+	if q.has("target"):
+		var to: Vector2 = q.target - Vector2(pip.global_position.x, pip.global_position.z)
+		var axes := camera.ground_axes()
+		var d3 := Vector3(to.x, 0.0, to.y)
+		hud.set_quest(q.text, Vector2(d3.dot(axes[0]), d3.dot(axes[1])), to.length())
+	else:
+		hud.set_quest(q.text, Vector2.ZERO, -1.0)
+
+
 func _process(delta: float) -> void:
 	_nav_v.update(_nav_axis(["ui_up", "p1_up", "p2_up"], ["ui_down", "p1_down", "p2_down"]), delta)
 	_nav_h.update(_nav_axis(["ui_left", "p1_left", "p2_left"], ["ui_right", "p1_right", "p2_right"]), delta)
 	if mode == Mode.MENU:
 		var moved := _menu_move()
 		if moved != 0:
-			_menu_index = posmod(_menu_index + moved, MENU_ITEMS.size())
+			_menu_index = posmod(_menu_index + moved, _menu_entries.size())
 			_show_menu()
 		if _menu_accept(true):
-			_start_mode(MENU_MODES[_menu_index])
+			var entry: Variant = _menu_entries[_menu_index]
+			if entry is String:
+				_story_new = entry == "new"
+				_start_mode(Mode.STORY)
+			else:
+				_start_mode(entry)
 	elif paused and hud.spell_book_open():
 		# Spell book page: left / right turn pages; B (A too) back to the pause menu.
 		if _nav_h.step != 0:
@@ -627,7 +720,7 @@ func _show_pause() -> void:
 
 func _open_spell_book() -> void:
 	hud.hide_menu()
-	hud.show_spell_book(SPELLBOOK)
+	hud.show_spell_book(casters[0].book if casters[0] else SPELLBOOK)
 
 
 func _close_spell_book() -> void:
@@ -644,6 +737,8 @@ func _restart() -> void:
 		_start_run()
 	elif mode == Mode.TUTORIAL:
 		tutorial.replay()
+	elif mode == Mode.STORY:
+		story.respawn()
 	else:
 		scores = [0, 0]
 		hud.set_score(0, 0)
@@ -681,6 +776,8 @@ func _physics_process(delta: float) -> void:
 				hud.hide_message()
 	if mode == Mode.SURVIVAL:
 		_update_survival_status()
+	elif mode == Mode.STORY:
+		_update_story_hud()
 	_update_grass_actors()
 	_update_camera_targets()
 
@@ -690,6 +787,9 @@ func _update_camera_targets() -> void:
 	for f in fighters:
 		if f.state != ArenaCharacter.State.OUT and not _is_benched(f):
 			t.append(f)
+	# Story: the sage being talked to stays in view too.
+	if mode == Mode.STORY and story.focus and is_instance_valid(story.focus):
+		t.append(story.focus)
 	if mode != Mode.MENU:
 		camera.targets = t
 
@@ -708,6 +808,12 @@ func _update_grass_actors() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	# Window-manager shortcuts (alt-tab, super-...) are not for the game.
 	if event is InputEventKey and (event.alt_pressed or event.meta_pressed or event.ctrl_pressed):
+		return
+	# Story text: A / Enter moves on (events, so even the quickest tap counts).
+	if not paused and hud.dialogue_open() and not event.is_echo() \
+			and (event.is_action_pressed("ui_accept") or event.is_action_pressed("p1_syl_a") or event.is_action_pressed("p2_syl_a")):
+		hud.advance_dialogue()
+		get_viewport().set_input_as_handled()
 		return
 	var back := event.is_action_pressed("toggle_two_player")
 	var start := event.is_action_pressed("restart_round")
@@ -762,6 +868,7 @@ func _tutorial_input(event: InputEvent) -> bool:
 func _mcp_state() -> Dictionary:
 	return {"mode": Mode.keys()[mode], "phase": Phase.keys()[phase], "paused": paused, "scores": scores, "two_player": two_player,
 		"survival": {"time": snappedf(survival.time, 0.1), "kills": survival.kills, "alive": survival.alive_enemies()} if survival else {},
+		"story": {"stage": story.stage, "state": Story.State.keys()[story.state], "quest": story.quest().get("text", "")} if story and mode == Mode.STORY else {},
 		"tutorial": {"lesson": tutorial.index, "of": tutorial.lessons.size(), "step": Tutorial.Step.keys()[tutorial.step],
 			"successes": tutorial.successes, "message": tutorial.message} if tutorial and tutorial.running else {},
 		"bpm": beat_clock.current_bpm() if beat_clock else 0.0,
