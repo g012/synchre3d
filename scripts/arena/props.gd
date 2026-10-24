@@ -91,6 +91,27 @@ func rebuild_from_arena(arena: Arena) -> void:
 		add_child(_leaves)
 
 
+## Moves a decoration (a dancing flower swapped by the Swap spell) to `xz`, keeping its
+## ground-following and grass footprint in step.
+func relocate(node: Node3D, xz: Vector2) -> void:
+	for e in _entries:
+		if e.node != node:
+			continue
+		var old: Vector2 = e.xz
+		e.xz = xz
+		e.y = _arena.height_at(xz)
+		node.position = Vector3(xz.x, e.y, xz.y)
+		var lists: Array = [_arena.decor_footprints]
+		if e.has("cell") and _cells.has(e.cell):
+			lists.append(_cells[e.cell].decor)
+		for list in lists:
+			for i in list.size():
+				if Vector2(list[i].x, list[i].y).distance_to(old) < 0.01:
+					list[i] = Vector3(xz.x, xz.y, list[i].z)
+		return
+	node.global_position = Vector3(xz.x, _arena.height_at(xz), xz.y)
+
+
 ## Lifts props (and their colliders and leaf cards) onto the current ground height.
 func _on_ground_changed(rect: Rect2) -> void:
 	if not _arena:

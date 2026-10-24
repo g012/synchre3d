@@ -583,8 +583,18 @@ func test_spellbook() -> void:
 		for k in p.size():
 			o.append(p.onset(k) - p.onset(0))
 		onsets.append(o)
-	check(onsets == [[0.0, 0.5, 1.5], [0.0, 0.5, 1.5, 2.0, 3.0], [0.0, 0.5, 1.5, 2.0, 3.0, 3.5, 4.5]],
-		"push rhythm: middles inserted as B croche X noire (%s)" % [onsets])
+	check(onsets == [[0.0, 0.5, 1.5], [0.0, 0.5, 1.5, 2.0, 3.5], [0.0, 0.5, 1.5, 2.0, 3.5, 4.0, 5.5]],
+		"push rhythm: middles inserted as B croche X dotted noire (%s)" % [onsets])
+	# Every middle lasts a whole number of beats, so a repeated middle comes back on the same
+	# beat alignment (odd half-beat middles are kept for stronger spells later).
+	var odd := []
+	for sp in book.spells:
+		var total := 0.0
+		for v in sp.middle_lengths:
+			total += v
+		if not is_equal_approx(fposmod(total, 1.0), 0.0):
+			odd.append(sp.id)
+	check(odd.is_empty(), "middles last whole beats (odd: %s)" % [odd])
 	var families := {}
 	for sp in book.spells:
 		families[sp.family] = true

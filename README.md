@@ -115,8 +115,9 @@ console). The camera follows both fighters and zooms out a little when they are 
    | Hex | B X … A | **Swap** (X X), Minion (B Y) |
 
    The first enabled spell of each family (in bold) also has level 1. Rhythms are written
-   as note lengths (♪ croche, ♩ noire) and the parts simply follow each other: Push level 1
-   is A♪ A♩ Y, level 2 A♪ A♩ B♪ X♩ Y, level 3 A♪ A♩ B♪ X♩ B♪ X♩ Y.
+   as note lengths (♪ croche, ♩ noire, ♩. noire pointée) and the parts simply follow each
+   other: Push level 1 is A♪ A♩ Y, level 2 A♪ A♩ B♪ X♩. Y, level 3 A♪ A♩ B♪ X♩. B♪ X♩. Y.
+   Every middle lasts whole beats, so a repeated middle is the same beat-aligned rhythm.
 
    **Push** is a beam: it shoots out at once (no travel time), shoves and hurts everyone
    along it, and grows longer and wider with each level. From level 2 the ground heaves up

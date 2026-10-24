@@ -97,6 +97,15 @@ func _physics_process(delta: float) -> void:
 		if d.length() < hit_radius and absf(dy) < 0.8:
 			_hit(t)
 			return
+	# Swap also trades places with a dancing flower.
+	if kind == Kind.SWAP:
+		for f in get_tree().get_nodes_in_group(DancingFlower.SWAP_GROUP):
+			var n := f as Node3D
+			var d := n.global_position - global_position
+			d.y = 0.0
+			if d.length() < hit_radius * 0.8 and global_position.y - n.global_position.y < 1.2:
+				_swap_flower(n)
+				return
 	if arena:
 		var p := Vector2(global_position.x, global_position.z)
 		for o in arena.obstacles:
@@ -159,6 +168,29 @@ func _swap(target: ArenaCharacter) -> void:
 			_sparkle(to)
 	if camera:
 		camera.shake(0.15)
+
+
+## Caster and flower trade places (the flower only if the caster stands on solid ground).
+func _swap_flower(flower: Node3D) -> void:
+	if not caster.is_alive() or not arena.is_over_ground(Vector2(caster.global_position.x, caster.global_position.z)):
+		_pop()
+		return
+	var a := caster.global_position
+	var b := flower.global_position
+	if fx:
+		_sparkle(a)
+		_sparkle(b)
+	caster.global_position = b
+	caster.velocity = Vector3.ZERO
+	caster.reset_physics_interpolation()
+	var props := arena.get_node_or_null("Props") as Props
+	if props:
+		props.relocate(flower, Vector2(a.x, a.z))
+	else:
+		flower.global_position = a
+	if camera:
+		camera.shake(0.12)
+	queue_free()
 
 
 func _sparkle(p: Vector3) -> void:

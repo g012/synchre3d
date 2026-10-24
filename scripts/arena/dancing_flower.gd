@@ -20,7 +20,12 @@ var _petals: Array[Node3D] = []
 var _idle_seed := 0.0
 
 
+## Things the Swap spell can trade places with besides characters.
+const SWAP_GROUP := &"swap_targets"
+
+
 func _ready() -> void:
+	add_to_group(SWAP_GROUP)
 	_idle_seed = randf() * TAU
 	_body = MODEL.instantiate() as Node3D
 	add_child(_body)
