@@ -222,7 +222,10 @@ func _apply_survival() -> void:
 	_bench(fighters[1], true) # again: its caster (and ring) may have just been created
 	inputs[0].prefixes = ["p1_", "p2_"]
 	var pip := fighters[0]
-	pip.brain = PlayerBrain.new(inputs[0])
+	var brain := PlayerBrain.new(inputs[0])
+	brain.auto_aim_on_hold = true
+	pip.brain = brain
+	pip.auto_aim = false
 	pip.opponent = null
 	pip.max_hp = SURVIVAL_HP
 	# Frozen until the tempo is set (see _start_run).

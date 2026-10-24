@@ -58,7 +58,7 @@ Tempo and speed: the shared tempo, or how fast fighters move.
 | Spell | Middle | Level 1 / 2 / 3 chant | Effect by level |
 |---|---|---|---|
 | **Knockout** | Y (1) | B X A / B X Y A / B X Y Y A | Spinning star: the target is knocked out 2 / 4 / 6 beats. It can't move, jump, dash or shove (it can still chant), but it can be pushed. |
-| Swap | X X (½, ½) | – / B X X X A / B X X X X X A | Small, very fast ball: if it touches someone, caster and target trade places. Range 6 / 10 / 14. |
+| Swap | X X (½, ½) | – / B X X X A / B X X X X X A | Small, very fast ball: if it touches someone, caster and target trade places, and the target is dazed (knocked out, stars over its head) for 1.5 / 2.5 / 3.5 beats. Range 6 / 10 / 14. |
 | Minion | B Y (1, 1) | – / B X B Y A / B X B Y B Y A | Necromancy: shadowy doubles of the caster climb out of the ground in front, chase the nearest enemy and shove. Level 2: 2 small ones; level 3: 3 bigger, stronger, quicker ones wreathed in sparks. They crumble after 16 beats. No limit on how many. |
 
 Durations, distances and forces are also scaled by precision (55–100%).

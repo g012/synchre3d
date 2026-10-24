@@ -25,7 +25,7 @@ var hit_radius := 0.8
 var strength := 15.0
 ## Health taken from the target (survival).
 var damage := 0.0
-## Knockout duration (s).
+## Knockout duration (s); also how long Swap's target is dazed.
 var stun_time := 2.0
 ## Snare: speed multiplier and duration (s).
 var slow_mult := 0.5
@@ -123,6 +123,8 @@ func _hit(target: ArenaCharacter) -> void:
 		Kind.SWAP:
 			if caster.is_alive():
 				_swap(target)
+				# Dazed by the jump: briefly knocked out where it lands.
+				target.knock_out(stun_time)
 		Kind.SNARE:
 			target.slow_down(slow_mult, slow_time)
 			if fx:

@@ -546,14 +546,22 @@ func _dash_trail(delta: float) -> void:
 		fx.puff(global_position + Vector3.UP * 0.12 - facing * 0.25, 0.6)
 
 
-## Little stars circling the head while knocked out.
+## Three little stars orbiting above the head while knocked out (redrawn every tick as
+## one-tick sprites, so they turn smoothly), shedding a sparkle now and then.
 func _ko_stars(delta: float) -> void:
+	if not fx:
+		return
+	var top := global_position + Vector3.UP * (1.05 * model_scale + 0.15)
+	var a := _anim_time * 4.5
+	for k in 3:
+		var ang := a + TAU * k / 3.0
+		var p := top + Vector3(cos(ang) * 0.42, 0.06 * sin(ang * 2.0), sin(ang) * 0.42) * model_scale / 1.15
+		fx.spawn(p, Vector3.ZERO, delta * 1.5, FxSprites.TILE_STAR, 6, 2, 14.0, 14.0)
 	_ko_fx -= delta
-	if fx and _ko_fx <= 0.0:
-		_ko_fx = 0.12
-		var a := _anim_time * 7.0
-		var p := global_position + Vector3(cos(a) * 0.3, 1.05 * model_scale, sin(a) * 0.3)
-		fx.spawn(p, Vector3(-sin(a), 0.1, cos(a)) * 1.2, 0.3, FxSprites.TILE_STAR, 6, 2, 5.0, 2.0, 0.0, 2.0)
+	if _ko_fx <= 0.0:
+		_ko_fx = 0.3
+		fx.spawn(top + Vector3(randf_range(-0.3, 0.3), 0.1, randf_range(-0.3, 0.3)), Vector3(0.0, 0.6, 0.0), 0.4,
+			FxSprites.TILE_STAR, 6, 2, 3.0, 1.0, 0.0, 1.0)
 
 
 ## Starts a buffered jump if standing on the ground.

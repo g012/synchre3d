@@ -200,6 +200,7 @@ func _cast_bolt(spell: SpellDefinition, caster: ArenaCharacter, origin: Vector3,
 			bolt.speed = 24.0
 			bolt.hit_radius = 0.55
 			bolt.max_range = _lv(6.0, 10.0, 14.0) * lerpf(0.8, 1.0, _power)
+			bolt.stun_time = _lv(1.5, 2.5, 3.5) * _power * _beat_seconds()
 		MagicBolt.Kind.KNOCKOUT:
 			bolt.radius = 0.24
 			bolt.speed = 13.0

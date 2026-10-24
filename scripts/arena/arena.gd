@@ -1391,17 +1391,11 @@ func _stream_ponds() -> void:
 		if _pond_cells.has(c):
 			continue
 		_pond_cells[c] = true
-		var rng := RandomNumberGenerator.new()
-		rng.seed = hash(Vector3i(c.x, c.y, layout_seed + 7919))
-		if rng.randf() >= POND_CHANCE or ponds.size() >= MAX_PONDS:
+		var q := _cell_pond(c)
+		if q.is_empty() or ponds.size() >= MAX_PONDS:
 			continue
-		var r := rng.randf_range(layout.pond_radius.x, layout.pond_radius.y)
-		var m := r + 1.0
-		var p := Vector2(c) * POND_CELL + Vector2(rng.randf_range(m, POND_CELL - m), rng.randf_range(m, POND_CELL - m))
-		if p.length() < SAFE_START + r:
-			continue
-		var q := {"id": _next_id, "center": p, "radius": r, "depth": layout.pond_depth,
-			"ph0": rng.randf() * TAU, "ph1": rng.randf() * TAU, "cell": c}
+		q.id = _next_id
+		q.cell = c
 		_next_id += 1
 		ponds.append(q)
 		_mark_collision(_pond_rect(q))
@@ -1409,6 +1403,41 @@ func _stream_ponds() -> void:
 	if changed:
 		_features_dirty = true
 		ponds_changed.emit()
+
+
+## The pond of world cell `c` ({} if none), from a hash of the cell.
+func _cell_pond(c: Vector2i) -> Dictionary:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(Vector3i(c.x, c.y, layout_seed + 7919))
+	if rng.randf() >= POND_CHANCE:
+		return {}
+	var r := rng.randf_range(layout.pond_radius.x, layout.pond_radius.y)
+	var m := r + 1.0
+	var p := Vector2(c) * POND_CELL + Vector2(rng.randf_range(m, POND_CELL - m), rng.randf_range(m, POND_CELL - m))
+	if p.length() < SAFE_START + r:
+		return {}
+	return {"center": p, "radius": r, "depth": layout.pond_depth, "ph0": rng.randf() * TAU, "ph1": rng.randf() * TAU}
+
+
+## Endless field: whether a prop of footprint `radius` at `p` keeps clear of every hole and
+## pond that is (or will be) generated around it, and of the start. Uses the deterministic
+## cell generators, so it holds before those cells have streamed in.
+func endless_spot_clear(p: Vector2, radius: float) -> bool:
+	if p.length() < SAFE_START + 1.5:
+		return false
+	var hc := Vector2i(floori(p.x / HOLE_CELL), floori(p.y / HOLE_CELL))
+	for dj in range(-1, 2):
+		for di in range(-1, 2):
+			for h in _cell_holes(hc + Vector2i(di, dj)):
+				if p.distance_to(Vector2(h.x, h.y)) < h.z + layout.hole_wobble + radius + 0.5:
+					return false
+	var pc := Vector2i(floori(p.x / POND_CELL), floori(p.y / POND_CELL))
+	for dj in range(-1, 2):
+		for di in range(-1, 2):
+			var q := _cell_pond(pc + Vector2i(di, dj))
+			if not q.is_empty() and p.distance_to(q.center) < q.radius * 1.15 + radius + 0.3:
+				return false
+	return true
 
 
 func _pond_rect(q: Dictionary) -> Rect2:

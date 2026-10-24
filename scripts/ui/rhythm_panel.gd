@@ -132,11 +132,14 @@ func _draw() -> void:
 		for k in 4:
 			draw_rect(Rect2(84 + k * 5, 4, 3, 3), PERFECT_COLOR if k < n else Color(1, 1, 1, 0.2))
 
-	# Auto-aim, or manual aim while LT is held (strafing).
-	if caster.character.auto_aim:
+	# Aim mode: auto or manual, and strafing while LT is held.
+	var ch := caster.character
+	if ch.strafe:
+		_text(Vector2(4, 35), "STRAFE + AUTO-AIM" if ch.auto_aim else "STRAFE / AIM", Color("86a2ea"))
+	elif ch.auto_aim:
 		_text(Vector2(4, 35), "AUTO-AIM", PERFECT_COLOR)
 	else:
-		_text(Vector2(4, 35), "STRAFE / AIM", Color("86a2ea"))
+		_text(Vector2(4, 35), "MANUAL AIM", Color(1, 1, 1, 0.45))
 
 	# --- syllable trail with timing ticks
 	for i in _trail.size():
