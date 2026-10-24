@@ -343,7 +343,15 @@ func _physics_process(delta: float) -> void:
 		State.SPAWNING:
 			velocity.y -= gravity * delta
 			move_and_slide()
-			if is_on_floor():
+			# Landing goes by the analytic ground too: streamed (endless) ground may not have
+			# its collision yet where a body drops in, and it would fall through forever.
+			var p := _xz()
+			var h := arena.height_at(p)
+			var on_ground := is_on_floor() or global_position.y <= h + 0.05
+			if on_ground and not arena.is_over_ground(p):
+				_start_fall()
+			elif on_ground:
+				global_position.y = maxf(global_position.y, h)
 				velocity = Vector3.ZERO
 				_squash_vel += 7.0
 				if fx:
