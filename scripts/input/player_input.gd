@@ -76,10 +76,10 @@ func dash_just_pressed() -> bool:
 	return false
 
 
-## True on the physics tick the auto-aim toggle (LT, analog: the InputMap deadzone is the
-## threshold) goes down.
-func aim_toggle_just_pressed() -> bool:
+## True while the manual-aim / strafe control (LT, analog: the InputMap deadzone is the
+## threshold) is held.
+func aim_held() -> bool:
 	for p in prefixes:
-		if Input.is_action_just_pressed(p + "aim"):
+		if Input.is_action_pressed(p + "aim"):
 			return true
 	return false

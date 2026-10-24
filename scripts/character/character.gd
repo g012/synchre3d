@@ -35,6 +35,9 @@ enum State { SPAWNING, ACTIVE, PUSHING, HITSTUN, FALLING, OUT, VICTORY, FROZEN }
 @export var auto_activate := false
 ## Permanent dithered darkening (0..1): summoned undead minions.
 @export var shade := 0.0
+## Palette index of sparks constantly rising around the character (-1 = none): elite minions.
+@export var aura_palette := -1
+var _aura_fx := 0.0
 
 @export_group("Movement")
 @export var move_speed := 5.0
@@ -137,11 +140,14 @@ var _slow_mult := 1.0
 var _status_fx := 0.0
 var _in_water := false
 var _splash := 0.0
-## Aimed spells turn the caster toward the nearest enemy (toggled with LT).
+## Aimed spells turn the caster toward the nearest enemy (off while LT is held).
 var auto_aim := true:
 	set(value):
-		auto_aim = value
-		auto_aim_changed.emit(self, value)
+		if value != auto_aim:
+			auto_aim = value
+			auto_aim_changed.emit(self, value)
+## Strafing (LT held): moving, dashing and shoving never turn the character.
+var strafe := false
 ## Incantation visuals, driven by the SpellCaster: 0 = idle, 1 = last syllable reached.
 var cast_level := 0.0
 var _cast_pose := 0.0
@@ -412,7 +418,7 @@ func _update_move(delta: float, control: float) -> void:
 	cur = cur.move_toward(target, rate * delta)
 	velocity.x = cur.x
 	velocity.z = cur.y
-	if wish.length_squared() > 0.01:
+	if wish.length_squared() > 0.01 and not strafe:
 		_turn_towards(wish, delta)
 
 
@@ -436,10 +442,18 @@ func _apply_gravity_and_move(delta: float) -> void:
 	# only drops into one if it comes down over it.
 	var p := _xz()
 	var grounded := velocity.y <= 0.0 and (is_on_floor() or global_position.y <= arena.height_at(p) + 0.05)
-	# Safety net: a body that ever ends up well under the ground counts as fallen.
-	if (grounded and not arena.is_over_ground(p)) or global_position.y < arena.height_at(p) - 0.8:
+	if grounded and not arena.is_over_ground(p):
 		_start_fall()
 		return
+	# Ground rising faster than its collision updates (a spell's ridge) can leave a body under
+	# the surface: put it back on top. Under the ground over a gap, though, it has fallen.
+	var h := arena.height_at(p)
+	if global_position.y < h - 0.3:
+		if not arena.is_over_ground(p):
+			_start_fall()
+			return
+		global_position.y = h
+		velocity.y = maxf(velocity.y, 0.0)
 	if not is_on_floor():
 		velocity.y -= gravity * delta
 	elif velocity.y < 0.0:
@@ -478,6 +492,13 @@ func _update_water(delta: float, airborne: bool) -> void:
 
 ## Sparks trailing a hasted character, drips falling off a snared one.
 func _status_trail(delta: float) -> void:
+	if fx and aura_palette >= 0 and is_alive():
+		_aura_fx -= delta
+		if _aura_fx <= 0.0:
+			_aura_fx = 0.07
+			var a := randf() * TAU
+			fx.spawn(global_position + Vector3(cos(a) * 0.3, randf_range(0.1, 0.7) * model_scale, sin(a) * 0.3),
+				Vector3(0.0, 1.2, 0.0), 0.45, FxSprites.TILE_SPARK, aura_palette, 2, 3.0, 1.0, -1.0, 1.0)
 	if not fx or (_haste <= 0.0 and _slow <= 0.0) or not is_alive():
 		return
 	_status_fx -= delta
@@ -507,8 +528,9 @@ func _try_dash() -> void:
 		velocity.y = maxf(velocity.y, 1.5)
 	velocity.x = dir.x * dash_speed
 	velocity.z = dir.z * dash_speed
-	_facing_angle = atan2(dir.x, dir.z)
-	facing = dir
+	if not strafe:
+		_facing_angle = atan2(dir.x, dir.z)
+		facing = dir
 	_squash_vel -= 6.0
 	_dash_fx = 0.0
 	if fx:
@@ -602,7 +624,7 @@ func _start_push() -> void:
 	_cooldown = push_cooldown + push_windup + push_active + push_recovery
 	# Snap to the input direction so the push goes where the player is steering.
 	var wish: Vector3 = brain.get_move(self) if brain else Vector3.ZERO
-	if wish.length_squared() > 0.04:
+	if wish.length_squared() > 0.04 and not strafe:
 		_facing_angle = atan2(wish.x, wish.z)
 		facing = Vector3(sin(_facing_angle), 0.0, cos(_facing_angle))
 	_squash_vel += 4.0

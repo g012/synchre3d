@@ -50,7 +50,7 @@ const HM_SPACING := 0.2
 const HM_CHUNK := 16
 ## Slots in the shader features texture.
 const MAX_HOLES := 64
-const MAX_MOUNDS := 32
+const MAX_MOUNDS := 48
 const MAX_PONDS := 8
 ## Height of every pond's water surface (the lawn is at 0).
 const WATER_LEVEL := -0.12
@@ -393,6 +393,22 @@ func raise_ground(p: Vector2) -> Dictionary:
 	return {"mound": m}
 
 
+## A short-lived mound at `p` (never merged with others): rises to `level` (1 bump, 2 hill)
+## in `rise` seconds, stays `hold` seconds, then sinks back in `sink` seconds and is removed.
+## The Push beam's travelling ridge is made of these. Returns the mound, or {} if full.
+func raise_temporary(p: Vector2, level: int, rise: float, hold: float, sink: float) -> Dictionary:
+	if mounds.size() >= MAX_MOUNDS:
+		return {}
+	var m := {"id": _next_id, "center": p, "radius": 0.0, "height": 0.0, "sharp": 0.0, "level": 0,
+		"ph0": _rng.randf() * TAU, "ph1": _rng.randf() * TAU, "from": Vector3.ZERO, "to": Vector3.ZERO, "t": 1.0,
+		"dur": rise, "hold": hold, "sink": sink}
+	_next_id += 1
+	mounds.append(m)
+	for k in clampi(level, 1, MOUND_LEVELS.size()):
+		_grow(m)
+	return m
+
+
 ## Grows mound `m` to its next level. Returns {"mound": m} or {"error": reason}.
 func grow_mound(m: Dictionary) -> Dictionary:
 	if m.level >= MOUND_LEVELS.size():
@@ -454,8 +470,15 @@ func _process(delta: float) -> void:
 	var flattened: Array[Dictionary] = []
 	for m in mounds:
 		if m.t >= 1.0:
+			# A temporary mound that has risen waits, then sinks away.
+			if m.has("hold") and m.level > 0:
+				m.hold -= delta
+				if m.hold <= 0.0:
+					m.dur = m.sink
+					m.level = 1
+					lower_mound(m)
 			continue
-		m.t = minf(m.t + delta / MOUND_GROW_TIME, 1.0)
+		m.t = minf(m.t + delta / m.get("dur", MOUND_GROW_TIME), 1.0)
 		# Rising overshoots a little, like earth heaving up and settling; sinking doesn't.
 		var e := 1.0 - pow(1.0 - m.t, 3.0)
 		if m.to.y > m.from.y:
@@ -1262,9 +1285,12 @@ func _stream_holes() -> void:
 		if far:
 			_free_wall(h.id)
 			holes.remove_at(i)
+			# Its collision chunks may still be loaded: they must forget the gap.
+			_mark_collision(_hole_rect(h))
 			gone = true
 	for i in range(mounds.size() - 1, -1, -1):
 		if (mounds[i].center as Vector2).distance_to(focus) > FORGET_DISTANCE:
+			_mark_collision(_mound_rect(mounds[i]))
 			mounds.remove_at(i)
 			gone = true
 	if gone:
@@ -1359,9 +1385,13 @@ func _fill_collision_chunk(c: Vector2i, e: Dictionary) -> void:
 		if h.scale > 0.02 and rect.grow((h.radius + layout.hole_wobble) * h.scale + GAP_SDF).has_point(h.center):
 			near_holes.append(h)
 	var near_mounds: Array[Dictionary] = []
+	var mound_centers := PackedVector2Array()
+	var mound_reach2 := PackedFloat32Array()
 	for m in mounds:
 		if m.height > 0.0 and rect.grow(m.radius * 1.17).has_point(m.center):
 			near_mounds.append(m)
+			mound_centers.append(m.center)
+			mound_reach2.append(m.radius * m.radius * 1.3689)
 	var data: PackedFloat32Array = e.data
 	var inv := 1.0 / HM_SPACING
 	var n := HM_CHUNK + 1
@@ -1374,8 +1404,10 @@ func _fill_collision_chunk(c: Vector2i, e: Dictionary) -> void:
 			var v := NAN
 			if d <= GAP_SDF:
 				var best := 0.0
-				for m in near_mounds:
-					best = maxf(best, _mound_value(p, m))
+				for mi in near_mounds.size():
+					# Cheap reject before the full (trigonometric) profile.
+					if p.distance_squared_to(mound_centers[mi]) < mound_reach2[mi]:
+						best = maxf(best, _mound_value(p, near_mounds[mi]))
 				v = best * inv
 			data[j * n + i] = v
 	e.data = data

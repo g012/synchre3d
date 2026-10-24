@@ -163,13 +163,13 @@ func set_mode(mode: String) -> void:
 	match mode:
 		"human":
 			_mode.text = "DUEL VS HUMAN"
-			_hint.text = "PADS 1+2 / P1 WASD IJKL SPC SHIFT E Q / P2 ARROWS NUM 2468 0 + . -  BACK/TAB MENU"
+			_hint.text = "PADS 1+2 / P1 WASD IJKL SPC SHIFT E Q / P2 ARROWS NUM 2468 0 + . -  START PAUSE"
 		"cpu":
 			_mode.text = "DUEL VS CPU"
-			_hint.text = "STICK/WASD MOVE  ABXY (KLJI) CHANT  RT/SPC JUMP  LB/SHIFT DASH  RB/E SHOVE  LT/Q AIM  BACK MENU"
+			_hint.text = "STICK/WASD MOVE  ABXY (KLJI) CHANT  RT/SPC JUMP  LB/SHIFT DASH  RB/E SHOVE  LT/Q STRAFE  START PAUSE"
 		"survival":
 			_mode.text = "SURVIVAL"
-			_hint.text = "STICK/WASD MOVE  ABXY (KLJI) CHANT  RT/SPC JUMP  LB/SHIFT DASH  RB/E SHOVE  LT/Q AIM  BACK MENU"
+			_hint.text = "STICK/WASD MOVE  ABXY (KLJI) CHANT  RT/SPC JUMP  LB/SHIFT DASH  RB/E SHOVE  LT/Q STRAFE  START PAUSE"
 
 
 ## Survival readout at the top (health, time, kills).

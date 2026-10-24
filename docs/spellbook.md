@@ -1,6 +1,9 @@
 # Spell book
 
-Every spell of Synchre lives in `assets/spells/spellbook.tres`, and all of them work. A
+Every spell of Synchre lives in `assets/spells/spellbook.tres`, and all of them work. In play right now: Push, Shockwave, Quicken, Swap and Minion; the others
+are disabled for testing. Level 1 (start + end) belongs to the first *enabled* spell of each
+family, so it is currently Push (A A Y), Quicken (Y B Y) and Swap (B X A); the tables below
+show the full book. A
 spell is in play when its `enabled` flag is on (in the inspector, or `enabled = false` in the
 file to take one out). Only enabled spells can be chanted, show on the rhythm panel and are
 used by the CPU.
@@ -29,7 +32,7 @@ Rhythms below are the gaps in beats before each note (the first note's lead-in i
 
 | Spell | Middle | Level 1 / 2 / 3 chant | Effect by level |
 |---|---|---|---|
-| **Push** | B X (½, ½) | A A Y / A A B X Y / A A B X B X Y | Ball of light shoving the first enemy it touches. Size 0.26 / 0.36 / 0.46, speed 14 / 16 / 18, knockback 10 / 15 / 19 (the RB shove is 7.5). |
+| **Push** | B X (½, ½) | A A Y / A A B X Y / A A B X B X Y | A beam from the hands, at once (no travel): shoves and hurts everyone along it. Length 6 / 8 / 10.5, width 0.35 / 0.55 / 0.8, knockback 10 / 15 / 19 (the RB shove is 7.5). Props stop it. From level 2 the ground heaves up along both sides of it as it goes (bumps, hills at level 3), throwing enemies out sideways. |
 | Shockwave | X X (1, 1) | – / A A X X Y / A A X X X X Y | Blast around the caster pushing every enemy away. Radius 2.4 / 3.4 / 4.4, force ×0.8 / ×1 / ×1.2. |
 
 ## Earth: X Y … X (Y ½ after X, X 1 beat after the last note)
@@ -56,7 +59,7 @@ Tempo and speed: the shared tempo, or how fast fighters move.
 |---|---|---|---|
 | **Knockout** | Y (1) | B X A / B X Y A / B X Y Y A | Spinning star: the target is knocked out 2 / 4 / 6 beats. It can't move, jump, dash or shove (it can still chant), but it can be pushed. |
 | Swap | X X (½, ½) | – / B X X X A / B X X X X X A | Small, very fast ball: if it touches someone, caster and target trade places. Range 6 / 10 / 14. |
-| Minion | B Y (1, 1) | – / B X B Y A / B X B Y B Y A | Necromancy: a small, shadowy double of the caster climbs out of the ground in front, chases the opponent and shoves softly. Crumbles after 8 / 16 / 24 beats. No limit on how many. |
+| Minion | B Y (1, 1) | – / B X B Y A / B X B Y B Y A | Necromancy: shadowy doubles of the caster climb out of the ground in front, chase the nearest enemy and shove. Level 2: 2 small ones; level 3: 3 bigger, stronger, quicker ones wreathed in sparks. They crumble after 16 beats. No limit on how many. |
 
 Durations, distances and forces are also scaled by precision (55–100%).
 

@@ -30,8 +30,10 @@ The game opens on a **menu** (stick / D-pad / arrows to choose, A / Enter / Star
   from memory with the spell sheets hidden (**R3 / F2** toggles them).
 - **Duel vs CPU** and **Duel vs human**: the island duels described below.
 
-**Back / Tab / Esc** returns to the menu from any mode. Every mode starts with player 1
-tapping the tempo.
+**Start / Back / Esc** pauses: resume, restart (a new survival run, or the duel from 0 - 0
+at the same tempo) or quit to the menu. Leaving the window (alt-tab) pauses too. Every mode
+starts with player 1 tapping the tempo while everyone stands still; the moment it locks, the
+fight (or run) is on.
 
 ## Controls
 
@@ -49,10 +51,9 @@ Project Settings.
 | Jump | RT (analog, 50% threshold, one jump per pull) | Space | Numpad 0 / Numpad Enter |
 | Shove (melee push) | RB | E | Numpad . |
 | Dash (toward the stick, else forward; 0.65 s cooldown, one per jump in the air) | LB | Left Shift | Numpad + |
-| Toggle auto-aim (on by default) | LT | Q | Numpad − |
-| Back to the menu | Back | Tab / Esc | |
+| Hold: manual aim and strafe (keep facing; auto-aim otherwise) | LT | Q | Numpad − |
+| Pause menu (resume / restart / quit) | Start or Back | R or Esc | |
 | Hide / show the spell sheets | R3 (right stick click) | F2 | |
-| Restart round (survival: new run) | Start | R | |
 | Fullscreen / debug: hide outline pass | | F11 / F1 | |
 
 Keyboard keys are bound by physical position, so they work the same on AZERTY. In 1-player
@@ -93,15 +94,22 @@ console). The camera follows both fighters and zooms out a little when they are 
    (the family's first spell), add the spell's middle once for **level 2**, twice for
    **level 3**: longer chants, stronger spells.
 
+   In play right now (the others wait in the book, disabled):
+
    | Family | Start … End | Spells (middle) |
    |---|---|---|
    | Force | A A … Y | **Push** (B X), Shockwave (X X) |
-   | Earth | X Y … X | **Open Pit** (Y Y), Mend Earth (B A) |
-   | Time | Y B … Y | **Hasten** (A X), Slow (B B), Quicken (X X), Snare (X B) |
-   | Hex | B X … A | **Knockout** (Y), Swap (X X), Minion (B Y) |
+   | Time | Y B … Y | **Quicken** (X X) |
+   | Hex | B X … A | **Swap** (X X), Minion (B Y) |
 
-   The first spell of each family (in bold) also has level 1: Push level 1 is just
-   A A Y, level 2 A A B X Y, level 3 A A B X B X Y. Rhythms, effects and per-level numbers
+   The first enabled spell of each family (in bold) also has level 1: Push level 1 is just
+   A A Y, level 2 A A B X Y, level 3 A A B X B X Y.
+
+   **Push** is a beam: it shoots out at once (no travel time), shoves and hurts everyone
+   along it, and grows longer and wider with each level. From level 2 the ground heaves up
+   along both sides of it as it goes, like the sea parting: bumps (hills at level 3) that
+   throw enemies out to the sides. **Minion** raises 2 small minions at level 2, and 3
+   bigger, stronger, quicker ones wreathed in sparks at level 3. Rhythms, effects and per-level numbers
    are in the [spell book](docs/spellbook.md).
 
    Timing is forgiving: each note may land within **40%** of its own duration (twice the
@@ -110,9 +118,11 @@ console). The camera follows both fighters and zooms out a little when they are 
    **A spell can start on any beat** (or between beats): the rhythm is checked relative to
    your own first syllable, as in the original.
 
-   **Auto-aim** (on by default, toggle with **LT** / Q / Numpad −): aimed spells (Push,
-   Swap, Knockout, Open Pit, Mend Earth's raised ground, Minion) turn you toward your
-   opponent as they fire. Mend Earth still closes the holes in front of where you faced.
+   **Auto-aim** (always on unless LT is held): aimed spells (Push, Swap, Knockout, Open Pit,
+   Mend Earth's raised ground, Minion) turn you toward your opponent (survival: the nearest
+   enemy) as they fire. **Hold LT** for manual aim: you keep facing the way you face while
+   you move (strafe), dashes and shoves don't turn you either, and spells fire straight
+   ahead. Mend Earth still closes the holes in front of where you faced.
 3. **Read the feedback.** Gathered magic grows at your hands with each correct syllable, and
    your character poses and bobs. While your syllables could still become several spells
    (they share an opening, like X for Open Pit, Swap and Knockout), the magic is a pale,

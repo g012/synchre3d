@@ -51,6 +51,7 @@ middle = PackedInt32Array(3, 3)
 middle_beats = PackedFloat32Array(0.5, 0.5)
 effect = 1
 palette_index = 11
+enabled = false
 description = "Digs in front: a mountain sinks to a hill, a hill to a bump, a bump to flat ground, and flat ground opens into a pit (wider at each level; level 3 digs two steps at once)."
 
 [sub_resource type="Resource" id="close_hole"]
@@ -62,6 +63,7 @@ middle = PackedInt32Array(1, 0)
 middle_beats = PackedFloat32Array(1, 0.5)
 effect = 2
 palette_index = 28
+enabled = false
 description = "Closes a hole in a cone in front; with none, raises the ground ahead: bump, then hill, then mountain (level 3 raises two steps at once), shoving whoever stands there."
 
 [sub_resource type="Resource" id="time"]
@@ -82,6 +84,7 @@ middle = PackedInt32Array(0, 2)
 middle_beats = PackedFloat32Array(0.5, 0.5)
 effect = 3
 palette_index = 7
+enabled = false
 description = "Tempo change: the shared tempo slides up over one bar (+10 / +20 / +30 BPM by level, max 160), so a chant almost finished still lands."
 
 [sub_resource type="Resource" id="slow"]
@@ -93,6 +96,7 @@ middle = PackedInt32Array(1, 1)
 middle_beats = PackedFloat32Array(1, 1)
 effect = 4
 palette_index = 14
+enabled = false
 description = "Tempo change: the shared tempo slides down over one bar (-10 / -20 / -30 BPM by level, min 80)."
 
 [sub_resource type="Resource" id="quicken"]
@@ -115,6 +119,7 @@ middle = PackedInt32Array(2, 1)
 middle_beats = PackedFloat32Array(1, 1)
 effect = 10
 palette_index = 31
+enabled = false
 description = "Throws a slow, heavy blob: whoever it hits is slowed down (to 65% / 50% / 38% speed for about 3.6 / 6 / 8.4 beats by level)."
 
 [sub_resource type="Resource" id="hex"]
@@ -135,6 +140,7 @@ middle = PackedInt32Array(3)
 middle_beats = PackedFloat32Array(1)
 effect = 8
 palette_index = 6
+enabled = false
 description = "Throws a spinning star: whoever it hits is knocked out (2 / 4 / 6 beats by level): can't move, but can be pushed."
 
 [sub_resource type="Resource" id="swap_ball"]

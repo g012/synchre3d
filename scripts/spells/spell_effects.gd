@@ -44,6 +44,11 @@ const SOUNDS := {
 ## Shockwave: reach around the caster and knockback (at the centre; 55% at the rim).
 @export var shockwave_radius := 3.4
 @export var shockwave_push := 14.0
+## Push beam ridge (level 2+): where it starts, how fast it runs, mound spacing, knockback.
+@export var wake_start := 1.3
+@export var wake_speed := 16.0
+@export var wake_spacing := 0.9
+@export var wake_force := 1.0
 ## Knockout: beats the target stays down.
 @export var knockout_beats := 4.0
 ## Quicken: speed multiplier on the caster (level 2) and how many beats it lasts.
@@ -64,6 +69,8 @@ var _debris_timer := 0.0
 var _rising := {}
 # Summoned minions: minion -> beat (BeatClock) at which it crumbles.
 var _minions := {}
+# Push beam ridges in progress (see _update_wakes).
+var _wakes: Array[Dictionary] = []
 var _sfx: AudioStreamPlayer
 # The cast being resolved: its level (1..3) and power (precision multiplier, ~0.55..1).
 var _level := 2
@@ -106,7 +113,7 @@ func cast(spell: SpellDefinition, caster: ArenaCharacter, origin: Vector3, level
 			origin = caster.hand_anchor()
 	match spell.effect:
 		SpellDefinition.Effect.PUSH:
-			_cast_bolt(spell, caster, origin, MagicBolt.Kind.PUSH)
+			_cast_beam(spell, caster, origin)
 		SpellDefinition.Effect.CREATE_HOLE:
 			_cast_open_pit(spell, caster)
 		SpellDefinition.Effect.CLOSE_HOLE:
@@ -165,6 +172,7 @@ func clear() -> void:
 	_animating.clear()
 	_rising.clear()
 	_minions.clear()
+	_wakes.clear()
 
 
 ## Push: a big fast ball of light. Swap: a small, very fast ball. Knockout: a spinning star.
@@ -227,6 +235,60 @@ func _cast_quicken(spell: SpellDefinition, caster: ArenaCharacter) -> void:
 				FxSprites.TILE_SPARK, spell.palette_index, 2, 3.0, 1.0, 0.0, 3.0)
 	_sound("raise", 1.5)
 	resolved.emit(caster, spell, true, "")
+
+
+## Push: a beam straight ahead (longer, wider, harder at each level); from level 2 the ground
+## heaves up along both sides of it as it goes, bumps (hills at level 3) that throw enemies
+## out to the sides, like the sea parting.
+func _cast_beam(spell: SpellDefinition, caster: ArenaCharacter, origin: Vector3) -> void:
+	var beam := MagicBeam.new()
+	beam.caster = caster
+	beam.arena = arena
+	beam.fx = fx
+	beam.camera = camera
+	beam.direction = caster.facing
+	beam.length = _lv(6.0, 8.0, 10.5)
+	beam.width = _lv(0.35, 0.55, 0.8)
+	beam.strength = _lv(10.0, 15.0, 19.0) * _power
+	beam.damage = _lv(14.0, 24.0, 38.0) * _power
+	beam.palette_index = spell.palette_index
+	beam.position = origin
+	add_child(beam)
+	caster.velocity -= caster.facing * 2.0
+	if _level >= 2:
+		var d := Vector2(caster.facing.x, caster.facing.z).normalized()
+		_wakes.append({"caster": caster, "origin": Vector2(caster.global_position.x, caster.global_position.z),
+			"dir": d, "length": beam.length, "level": _level - 1, "travelled": 0.0, "next": wake_start,
+			"offset": beam.width * 0.5 + Arena.MOUND_LEVELS[_level - 2].x * 0.6, "pushed": {},
+			"palette": spell.palette_index, "force": _power})
+	_sound("push", 0.8)
+	resolved.emit(caster, spell, true, "")
+
+
+## The beam's ridges: temporary mounds raised one pair after another, either side of its path.
+func _update_wakes(delta: float) -> void:
+	for i in range(_wakes.size() - 1, -1, -1):
+		var w: Dictionary = _wakes[i]
+		w.travelled += wake_speed * delta
+		var d: Vector2 = w.dir
+		var side: Vector2 = Vector2(-d.y, d.x) * float(w.offset)
+		while w.next <= minf(w.travelled, w.length):
+			var c: Vector2 = w.origin + w.dir * w.next
+			w.next += wake_spacing * (1.0 + 0.4 * (w.level - 1))
+			for p in [c + side, c - side]:
+				if not arena.is_over_ground(p):
+					continue
+				var m := arena.raise_temporary(p, w.level, 0.16, 0.12, 0.3)
+				if m.is_empty():
+					continue
+				# One shared "pushed" set: each enemy gets a single shove per beam.
+				_rising[m.id] = {"caster": w.caster, "palette": w.palette, "pushed": w.pushed, "force": wake_force * w.force,
+					"damage": 6.0, "axis_origin": w.origin, "axis_dir": w.dir}
+				if fx and randf() < 0.5:
+					fx.spawn(Vector3(p.x, arena.height_at(p) + 0.1, p.y), Vector3(randf_range(-1, 1), 2.5, randf_range(-1, 1)), 0.4,
+						FxSprites.TILE_PUFF, 25, 2, 6.0, 2.0, 6.0, 2.0)
+		if w.next > w.length:
+			_wakes.remove_at(i)
 
 
 ## Seconds per beat right now (shared tempo), 0.6 without one.
@@ -368,50 +430,70 @@ func _cast_tempo(spell: SpellDefinition, caster: ArenaCharacter, amount: float) 
 
 ## Raise Minion: a small undead double of the caster climbs out of the ground in front and
 ## shoves enemies softly, until it crumbles after `minion_beats` beats.
+## Raise Minion: small undead doubles of the caster climb out of the ground in front and
+## shove enemies, until they crumble. More of them at higher levels (1 / 2 / 3), and at level
+## 3 they are bigger, stronger, quicker and wreathed in the spell's sparks.
 func _cast_minion(spell: SpellDefinition, caster: ArenaCharacter) -> void:
 	var here := Vector2(caster.global_position.x, caster.global_position.z)
 	var dir := Vector2(caster.facing.x, caster.facing.z).normalized()
-	var spot := here
-	var found := false
-	for d in [1.2, 0.8, 1.7]:
-		spot = here + dir * d
-		if arena.ground_sdf(spot) < -0.45:
-			found = true
-			break
-	if not found:
+	var count := _level
+	var elite := _level >= 3
+	var spawned := 0
+	for i in count:
+		# Fanned out in front of the caster.
+		var a := (i - (count - 1) * 0.5) * 0.7
+		var fan := dir.rotated(a)
+		var spot := Vector2.INF
+		for d in [1.2, 0.8, 1.7]:
+			var q: Vector2 = here + fan * d
+			if arena.ground_sdf(q) < -0.45:
+				spot = q
+				break
+		if spot == Vector2.INF:
+			continue
+		_raise_minion(spell, caster, spot, elite)
+		spawned += 1
+	if spawned == 0:
 		_fizzle_at(here + dir * 1.2, spell.palette_index)
 		resolved.emit(caster, spell, false, "no ground")
 		return
+	_sound("raise", 1.25 if elite else 1.4)
+	resolved.emit(caster, spell, true, "")
+
+
+func _raise_minion(spell: SpellDefinition, caster: ArenaCharacter, spot: Vector2, elite: bool) -> void:
 	var m := CHARACTER_SCENE.instantiate() as ArenaCharacter
 	m.name = "Minion"
 	m.display_name = "Minion"
 	m.model_scene = caster.model_scene
-	m.model_scale = caster.model_scale * minion_scale
+	m.model_scale = caster.model_scale * (minion_scale * 1.3 if elite else minion_scale)
 	m.color_index = caster.color_index
 	m.team = caster.team
 	m.opponent = caster.opponent
 	m.arena = arena
 	m.camera = camera
 	m.fx = fx
-	m.shade = 0.5
+	m.shade = 0.2 if elite else 0.5
+	m.aura_palette = spell.palette_index if elite else -1
 	m.spawn_height = 0.9
 	m.auto_activate = true
-	m.move_speed = 3.6
-	m.push_strength = minion_push * _lv(0.8, 1.0, 1.2)
-	m.push_range = 0.95
-	m.push_cooldown = 0.8
+	m.move_speed = 4.3 if elite else 3.6
+	m.push_strength = minion_push * (1.5 if elite else 1.0) * _power
+	m.push_damage = 12.0 if elite else 6.0
+	m.push_range = 1.05 if elite else 0.95
+	m.push_cooldown = 0.6 if elite else 0.8
 	var col := m.get_node("Collision") as CollisionShape3D
 	var cap := CapsuleShape3D.new()
-	cap.radius = 0.2
-	cap.height = 0.6
+	cap.radius = 0.26 if elite else 0.2
+	cap.height = 0.8 if elite else 0.6
 	col.shape = cap
-	col.position = Vector3(0.0, 0.3, 0.0)
+	col.position = Vector3(0.0, cap.height * 0.5, 0.0)
 	add_child(m)
 	m.brain = AIBrain.new(arena, randi())
 	m.spawn(Vector3(spot.x, arena.height_at(spot), spot.y), caster.facing)
 	m.eliminated.connect(_minion_gone)
 	var clock := BeatClock.instance
-	_minions[m] = (clock.beats_now() if clock and clock.running else 0.0) + minion_beats * _lv(0.5, 1.0, 1.5) * _power
+	_minions[m] = (clock.beats_now() if clock and clock.running else 0.0) + minion_beats * _power
 	_rune(spot, 0.9, spell.palette_index)
 	if fx:
 		fx.dust_ring(Vector3(spot.x, arena.height_at(spot) + 0.05, spot.y), 8)
@@ -419,8 +501,6 @@ func _cast_minion(spell: SpellDefinition, caster: ArenaCharacter) -> void:
 			var a := TAU * k / 6.0
 			fx.spawn(Vector3(spot.x, arena.height_at(spot) + 0.1, spot.y), Vector3(cos(a) * 0.5, 2.0, sin(a) * 0.5), 0.5,
 				FxSprites.TILE_SPARK, spell.palette_index, 2, 3.0, 1.0, 2.0, 1.0)
-	_sound("raise", 1.4)
-	resolved.emit(caster, spell, true, "")
 
 
 func _minion_gone(m: ArenaCharacter) -> void:
@@ -470,8 +550,9 @@ func _sound(key: String, pitch := 1.0) -> void:
 
 ## Rising ground shoves whoever stands on it outward (once per growth); the caster just
 ## rides it.
-func _physics_process(_delta: float) -> void:
+func _physics_process(delta: float) -> void:
 	_expire_minions()
+	_update_wakes(delta)
 	if _rising.is_empty():
 		return
 	for m in arena.mounds:
@@ -485,9 +566,14 @@ func _physics_process(_delta: float) -> void:
 			if d.length() > m.radius * 1.05 + ArenaCharacter.RADIUS:
 				continue
 			var out := d.normalized() if d.length() > 0.05 else Vector2(info.caster.facing.x, info.caster.facing.z)
+			if info.has("axis_dir"):
+				# The beam's ridges throw enemies straight out to their side of the beam.
+				var ad: Vector2 = info.axis_dir
+				var rel: Vector2 = Vector2(c.global_position.x, c.global_position.z) - (info.axis_origin as Vector2)
+				out = Vector2(-ad.y, ad.x) * (1.0 if ad.cross(rel) > 0.0 else -1.0)
 			var level: int = clampi(m.level, 1, raise_push.size())
 			c.receive_push(Vector3(out.x, 0.0, out.y), raise_push[level - 1] * info.force, info.caster)
-			c.take_damage(8.0 * level * info.force, info.caster)
+			c.take_damage(info.get("damage", 8.0 * level) * info.force, info.caster)
 			# Launched upward too: the ground heaves under them.
 			c.velocity.y = 2.5 + 1.5 * level
 			info.pushed[c] = true

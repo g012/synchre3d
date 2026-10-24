@@ -5,7 +5,7 @@ extends Node
 ##   reset) and wins.
 ## * Single player (survival): Pip alone on the endless field (Arena.endless) while the
 ##   Survival director sends enemies, until Pip falls or runs out of health.
-## Back / Tab / Esc returns to the menu from any mode.
+## Start / Back / Esc pauses (resume, restart, quit to the menu); so does leaving the window.
 ##
 ## Tempo: before the first round player 1 taps four even beats (the original Synchre
 ## count-in rule, clamped to 80-160 BPM); the match starts as soon as they lock. That tempo
@@ -25,9 +25,12 @@ enum Mode { MENU, SURVIVAL, DUEL_CPU, DUEL_HUMAN }
 enum Phase { MENU, TEMPO, INTRO, FIGHT, ROUND_OVER, RUN, GAME_OVER }
 
 const MENU_ITEMS: Array[String] = ["SINGLE PLAYER - SURVIVAL", "DUEL VS CPU", "DUEL VS HUMAN"]
+const PAUSE_ITEMS: Array[String] = ["RESUME", "RESTART", "QUIT TO MENU"]
 ## Survival: Pip's health.
 const SURVIVAL_HP := 100.0
 
+## Pause when the window loses focus (alt-tab).
+@export var pause_on_focus_loss := true
 ## Delay after a round ends before the next one starts.
 @export var round_over_time := 2.6
 
@@ -47,6 +50,8 @@ var fighters: Array[ArenaCharacter] = []
 var phase := Phase.MENU
 var survival: Survival
 var _menu_index := 0
+var paused := false
+var _pause_index := 0
 var _camera_home := Vector3.ZERO
 var phase_time := 0.0
 var _landed := 0
@@ -62,6 +67,10 @@ var _tempo_dirty := false
 
 
 func _ready() -> void:
+	# The flow (menus, pause) keeps running while the game is paused; everything else stops.
+	process_mode = Node.PROCESS_MODE_ALWAYS
+	for c in get_children():
+		c.process_mode = Node.PROCESS_MODE_PAUSABLE
 	fighters.append(_make_fighter("Pip", PIP_MODEL, 4))
 	fighters.append(_make_fighter("Mog", MOG_MODEL, 11))
 	fighters[0].opponent = fighters[1]
@@ -73,6 +82,7 @@ func _ready() -> void:
 	arena.rebuilt.connect(_frame_arena)
 	beat_clock = BeatClock.new()
 	beat_clock.name = "BeatClock"
+	beat_clock.process_mode = Node.PROCESS_MODE_PAUSABLE
 	add_child(beat_clock)
 	survival = Survival.new()
 	survival.name = "Survival"
@@ -88,6 +98,7 @@ func _ready() -> void:
 
 ## Title menu over the island: everything stops, fighters leave the stage.
 func enter_menu() -> void:
+	_set_paused(false)
 	mode = Mode.MENU
 	phase = Phase.MENU
 	survival.stop()
@@ -141,6 +152,12 @@ func _bench(f: ArenaCharacter, benched: bool) -> void:
 	f.visible = not benched
 	f.process_mode = Node.PROCESS_MODE_DISABLED if benched else Node.PROCESS_MODE_INHERIT
 	f.collision_layer = 0 if benched else Arena.LAYER_CHARACTERS
+	# The caster's ring and orb hang under a plain Node, which visibility doesn't pass through.
+	var i := fighters.find(f)
+	if i >= 0 and casters[i]:
+		for n in casters[i].get_children():
+			if n is Node3D:
+				n.visible = not benched
 	if benched:
 		f.remove_from_group(ArenaCharacter.GROUP)
 	elif not f.is_in_group(ArenaCharacter.GROUP):
@@ -202,12 +219,14 @@ func _apply_mode() -> void:
 func _apply_survival() -> void:
 	_set_human(0, true)
 	_set_human(1, false)
+	_bench(fighters[1], true) # again: its caster (and ring) may have just been created
 	inputs[0].prefixes = ["p1_", "p2_"]
 	var pip := fighters[0]
 	pip.brain = PlayerBrain.new(inputs[0])
 	pip.opponent = null
 	pip.max_hp = SURVIVAL_HP
-	pip.auto_activate = true
+	# Frozen until the tempo is set (see _start_run).
+	pip.auto_activate = false
 	survival.player = pip
 	hud.set_mode("survival")
 	var solo: Array[SpellCaster] = [casters[0]]
@@ -231,6 +250,7 @@ func _set_human(i: int, human: bool) -> void:
 	if human and inputs[i] == null:
 		var input := PlayerInput.new()
 		input.name = "Input%d" % (i + 1)
+		input.process_mode = Node.PROCESS_MODE_PAUSABLE
 		input.camera = camera
 		add_child(input)
 		input.syllable_pressed.connect(casters[i].syllable)
@@ -311,20 +331,27 @@ func _start_match() -> void:
 			c.cancel()
 			c.listening = true
 	hud.set_panels_visible(true)
+	# Straight into the action: everyone is already standing there.
 	if mode == Mode.SURVIVAL:
 		_start_run(false)
 	else:
-		start_round()
+		_round_decided = false
+		_start_fight()
 
 
-## A survival run: fresh endless field (unless just built), Pip at the origin, go.
+## A survival run. Right after the tempo: Pip is already on the field, just let go.
+## Otherwise (again / restart): a fresh endless field and Pip dropped at its origin.
 func _start_run(new_field := true) -> void:
+	phase = Phase.RUN
+	phase_time = 0.0
+	var pip := fighters[0]
 	if new_field:
 		arena.focus = Vector2.ZERO
 		arena.rebuild()
-	phase = Phase.RUN
-	phase_time = 0.0
-	_reset_arena_and_spawn()
+		_reset_arena_and_spawn()
+	# Still dropping in: it starts moving when it lands.
+	pip.auto_activate = true
+	pip.set_frozen(false)
 	survival.start()
 	hud.show_message("SURVIVE!", hud.palette_color(6, 3), "PUSH THEM INTO THE HOLES")
 
@@ -356,8 +383,20 @@ func start_round() -> void:
 	phase_time = 0.0
 	_landed = 0
 	_round_decided = false
+	for f in fighters:
+		f.auto_activate = false
 	_reset_arena_and_spawn()
 	hud.show_message("READY?", hud.palette_color(1, 3), "%d BPM" % roundi(beat_clock.current_bpm()))
+
+
+## Fighters let go (anyone still dropping in starts when it lands).
+func _start_fight() -> void:
+	hud.show_message("FIGHT!", hud.palette_color(6, 3))
+	for f in fighters:
+		f.auto_activate = true
+		f.set_frozen(false)
+	phase = Phase.FIGHT
+	phase_time = 0.0
 
 
 func _on_landed(_c: ArenaCharacter) -> void:
@@ -403,7 +442,7 @@ func _game_over(defeated: bool) -> void:
 	survival.stop()
 	var t := int(survival.time)
 	hud.show_message("DEFEATED" if defeated else "YOU FELL", hud.palette_color(4, 3),
-		"SURVIVED %d:%02d  -  %d KILLS     START / R: AGAIN    BACK: MENU" % [t / 60, t % 60, survival.kills])
+		"SURVIVED %d:%02d  -  %d KILLS     START / R: AGAIN    BACK / ESC: MENU" % [t / 60, t % 60, survival.kills])
 
 
 func _update_survival_status() -> void:
@@ -414,8 +453,27 @@ func _update_survival_status() -> void:
 
 
 func _process(_delta: float) -> void:
-	if mode != Mode.MENU:
-		return
+	if mode == Mode.MENU:
+		var moved := _menu_move()
+		if moved != 0:
+			_menu_index = posmod(_menu_index + moved, MENU_ITEMS.size())
+			_show_menu()
+		if _menu_accept(true):
+			_start_mode([Mode.SURVIVAL, Mode.DUEL_CPU, Mode.DUEL_HUMAN][_menu_index])
+	elif paused:
+		var moved := _menu_move()
+		if moved != 0:
+			_pause_index = posmod(_pause_index + moved, PAUSE_ITEMS.size())
+			_show_pause()
+		# Start resumes (see _unhandled_input), so only A / Enter pick an item here.
+		if _menu_accept(false):
+			match _pause_index:
+				0: _set_paused(false)
+				1: _restart()
+				2: enter_menu()
+
+
+func _menu_move() -> int:
 	var moved := 0
 	for a in ["ui_up", "p1_up", "p2_up"]:
 		if Input.is_action_just_pressed(a):
@@ -423,16 +481,60 @@ func _process(_delta: float) -> void:
 	for a in ["ui_down", "p1_down", "p2_down"]:
 		if Input.is_action_just_pressed(a):
 			moved = 1
-	if moved != 0:
-		_menu_index = posmod(_menu_index + moved, MENU_ITEMS.size())
-		_show_menu()
-	for a in ["ui_accept", "p1_syl_a", "p2_syl_a", "restart_round"]:
+	return moved
+
+
+func _menu_accept(with_start: bool) -> bool:
+	for a in ["ui_accept", "p1_syl_a", "p2_syl_a"]:
 		if Input.is_action_just_pressed(a):
-			_start_mode([Mode.SURVIVAL, Mode.DUEL_CPU, Mode.DUEL_HUMAN][_menu_index])
-			return
+			return true
+	return with_start and Input.is_action_just_pressed("restart_round")
+
+
+# ------------------------------------------------------------------ pause
+
+func _set_paused(on: bool) -> void:
+	if on == paused:
+		return
+	paused = on
+	get_tree().paused = on
+	if on:
+		_pause_index = 0
+		_show_pause()
+	else:
+		hud.hide_menu()
+		# A chant can't survive a pause (the beat went on meanwhile).
+		for c in casters:
+			if c:
+				c.cancel()
+
+
+func _show_pause() -> void:
+	hud.show_menu("PAUSED", PAUSE_ITEMS, _pause_index, "STICK / D-PAD: CHOOSE    A / ENTER: SELECT\nSTART / BACK / ESC: RESUME")
+
+
+## Pause menu "restart": a new survival run, or the duel from 0 - 0 (same tempo).
+func _restart() -> void:
+	_set_paused(false)
+	if phase == Phase.TEMPO:
+		begin_tempo_setup()
+	elif mode == Mode.SURVIVAL:
+		_start_run()
+	else:
+		scores = [0, 0]
+		hud.set_score(0, 0)
+		start_round()
+
+
+func _notification(what: int) -> void:
+	# Alt-tabbing away mid-game pauses it.
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT and pause_on_focus_loss and mode != Mode.MENU and is_node_ready():
+		_set_paused(true)
 
 
 func _physics_process(delta: float) -> void:
+	if paused:
+		return
 	phase_time += delta
 	var everyone := get_tree().get_nodes_in_group(ArenaCharacter.GROUP)
 	for a in everyone.size():
@@ -443,11 +545,7 @@ func _physics_process(delta: float) -> void:
 			_update_tempo_detection()
 		Phase.INTRO:
 			if _landed >= fighters.size() and phase_time > 1.0:
-				hud.show_message("FIGHT!", hud.palette_color(6, 3))
-				for f in fighters:
-					f.set_frozen(false)
-				phase = Phase.FIGHT
-				phase_time = 0.0
+				_start_fight()
 		Phase.FIGHT:
 			if phase_time > 0.7 and hud._message.text == "FIGHT!":
 				hud.hide_message()
@@ -484,15 +582,24 @@ func _update_grass_actors() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	var escape: bool = event is InputEventKey and event.pressed and not event.echo and (event as InputEventKey).keycode == KEY_ESCAPE
-	if event.is_action_pressed("toggle_two_player") or escape:
-		if mode != Mode.MENU:
-			enter_menu()
-	elif event.is_action_pressed("restart_round"):
-		if mode == Mode.SURVIVAL and phase in [Phase.RUN, Phase.GAME_OVER]:
-			_start_run()
-		elif mode in [Mode.DUEL_CPU, Mode.DUEL_HUMAN] and phase != Phase.TEMPO:
-			start_round()
+	# Window-manager shortcuts (alt-tab, super-...) are not for the game.
+	if event is InputEventKey and (event.alt_pressed or event.meta_pressed or event.ctrl_pressed):
+		return
+	var back := event.is_action_pressed("toggle_two_player")
+	var start := event.is_action_pressed("restart_round")
+	if back or start:
+		if mode == Mode.MENU:
+			return
+		if paused:
+			_set_paused(false)
+		elif mode == Mode.SURVIVAL and phase == Phase.GAME_OVER:
+			if start:
+				_start_run()
+			else:
+				enter_menu()
+		else:
+			_set_paused(true)
+		get_viewport().set_input_as_handled()
 	elif (event is InputEventJoypadButton and event.pressed and (event as InputEventJoypadButton).button_index == JOY_BUTTON_RIGHT_STICK) \
 			or (event is InputEventKey and event.pressed and not event.echo and (event as InputEventKey).keycode == KEY_F2):
 		# Hide / show the spell sheets: practise chanting from memory.
@@ -506,7 +613,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _mcp_state() -> Dictionary:
-	return {"mode": Mode.keys()[mode], "phase": Phase.keys()[phase], "scores": scores, "two_player": two_player,
+	return {"mode": Mode.keys()[mode], "phase": Phase.keys()[phase], "paused": paused, "scores": scores, "two_player": two_player,
 		"survival": {"time": snappedf(survival.time, 0.1), "kills": survival.kills, "alive": survival.alive_enemies()} if survival else {},
 		"bpm": beat_clock.current_bpm() if beat_clock else 0.0,
 		"decided": _round_decided, "message": hud._message.text if hud._message.visible else ""}
