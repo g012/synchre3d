@@ -1356,6 +1356,7 @@ func _stream_holes() -> void:
 			# Its collision chunks may still be loaded: they must forget the gap.
 			_mark_collision(_hole_rect(h))
 			gone = true
+			hole_closed.emit(h)
 	for i in range(mounds.size() - 1, -1, -1):
 		if (mounds[i].center as Vector2).distance_to(focus) > FORGET_DISTANCE:
 			_mark_collision(_mound_rect(mounds[i]))
@@ -1377,6 +1378,8 @@ func _stream_holes() -> void:
 		var spec: Vector3 = q[1]
 		var h := _add_hole(Vector2(spec.x, spec.y), spec.z, 1.0, false, _rng.randf() * TAU, _rng.randf() * TAU)
 		h.cell = q[0]
+		# Ponds stream in before the holes beside them: their waterfalls need to know.
+		hole_opened.emit(h)
 
 
 ## Ponds come and go with their cells (a pond is static while it exists).
