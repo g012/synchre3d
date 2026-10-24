@@ -27,7 +27,10 @@ extends RefCounted
 ##   closed form instead of being sampled once per rendered frame. The result is exactly the
 ##   original's behavior at infinite frame rate: it no longer depends on FPS or physics ticks,
 ##   and the same timestamps always give the same result (deterministic, testable, network-ready).
-## * Patterns may require specific buttons per note (`RhythmPattern.syllables`).
+## * Patterns may require specific buttons per note (`RhythmPattern.syllables`), or chords
+##   (`RhythmPattern.masks`): presses within `chord_window` of a note join it as one chord
+##   note. While the newest note might still become a chord, a part of the expected chord
+##   keeps the incantation going; the full match needs the exact chord.
 ## * Prefix progress, per-note early/late judgement and "fizzle" events are derived from the
 ##   very same tolerance math, for feedback/visuals only; the full match stays authoritative.
 ##   Progress follows every spell the syllables so far could still become (spells sharing an
@@ -69,6 +72,8 @@ var tolerance := TOLERANCE
 ## When > 0: the same window for every note, in beats, whatever its duration (the arena game
 ## uses this and rewards precision instead, see `last_precision`); replaces `tolerance`.
 var tolerance_beats := 0.0
+## Presses this close (seconds) to the newest note join it as a chord (0 = no chords).
+var chord_window := 0.0
 ## Precision of the last matched pattern: 1 = every note dead on the beat grid that fits
 ## them best, 0 = every note at the edge of its tolerance.
 var last_precision := 1.0
@@ -88,6 +93,8 @@ var notes: Array[Dictionary] = []
 var progress_pattern: RhythmPattern = null
 var progress_step := 0
 var progress_candidates: Array[Dictionary] = []
+# Progress as it was before the newest note, to re-judge it when a chord grows.
+var _before_newest := {}
 
 
 func _init(pattern_list: Array[RhythmPattern] = []) -> void:
@@ -118,20 +125,52 @@ func clear() -> void:
 ## Registers a tap of `instr` at `time` (seconds, monotonic clock).
 func press(instr: int, time: float) -> void:
 	advance(time)
-	notes.append({"instr": instr, "t": time, "duration": 0.0, "consumed": false})
+	var bit := 1 << instr
+	if chord_window > 0.0 and not notes.is_empty():
+		var newest: Dictionary = notes[-1]
+		if not newest.consumed and time - newest.t <= chord_window and (newest.mask & bit) == 0:
+			# Another button of the newest note: it becomes (or grows) a chord, judged again
+			# from the progress it started from.
+			newest.mask |= bit
+			note_pressed.emit(instr, time)
+			if bpm <= 0.0:
+				return
+			_restore_progress()
+			var m := _match_patterns(time)
+			_track_progress(newest.t, m)
+			return
+	notes.append({"instr": instr, "mask": bit, "t": time, "duration": 0.0, "consumed": false})
 	if notes.size() > MAX_NOTES:
 		notes.remove_at(0)
 	note_pressed.emit(instr, time)
 	if bpm <= 0.0 and not (tempo_from_openings and _lock_from_opening(time)):
 		return
+	_before_newest = {"pattern": progress_pattern, "step": progress_step, "candidates": progress_candidates.duplicate(true)}
 	var matched := _match_patterns(time)
 	_track_progress(time, matched)
+
+
+func _restore_progress() -> void:
+	if _before_newest.is_empty():
+		return
+	progress_pattern = _before_newest.pattern
+	progress_step = _before_newest.step
+	progress_candidates.assign(_before_newest.candidates)
+
+
+## Whether note `note` plays note `k` of `pattern` (buttons only). `partial`: the newest note
+## may still grow into the expected chord, so a part of it is enough.
+func _note_ok(pattern: RhythmPattern, k: int, note: Dictionary, partial := false) -> bool:
+	if not pattern.masks.is_empty():
+		var m := pattern.masks[k]
+		return note.mask == m or (partial and (note.mask & ~m) == 0)
+	return pattern.syllables.is_empty() or note.instr == pattern.syllables[k]
 
 
 ## Same as the original: remembers how long the newest matching tap was held.
 func release(instr: int, time: float) -> void:
 	for i in range(notes.size() - 1, -1, -1):
-		if notes[i].instr == instr and is_zero_approx(notes[i].duration):
+		if (notes[i].mask & (1 << instr)) != 0 and is_zero_approx(notes[i].duration):
 			notes[i].duration = time - notes[i].t
 			break
 
@@ -255,7 +294,7 @@ func _lock_from_opening(time: float) -> bool:
 			var ok := true
 			for j in k:
 				var note: Dictionary = notes[first + j]
-				if note.consumed or note.instr != pattern.syllables[j]:
+				if note.consumed or not _note_ok(pattern, j, note):
 					ok = false
 					break
 				idx.append(first + j)
@@ -329,15 +368,16 @@ func _recent(pattern: RhythmPattern, time: float) -> Array[int]:
 ## Fits the first `count` notes of `pattern` onto the taps `idx` (the newest `count` taps).
 ## Returns [lo, hi] = the feasible range of measure-start times, or [] if impossible.
 ## `final` adds the original's constraint that detection happens at/after the last tap,
-## i.e. the measure may not end before the last note.
-func _fit(pattern: RhythmPattern, idx: Array[int], count: int, final: bool) -> Array[float]:
+## i.e. the measure may not end before the last note. `partial_last`: the newest tap may be
+## a chord still being pressed (see _note_ok).
+func _fit(pattern: RhythmPattern, idx: Array[int], count: int, final: bool, partial_last := false) -> Array[float]:
 	var bd := beat_duration()
 	var first := idx.size() - count
 	var lo := -INF
 	var hi := INF
 	for k in count:
 		var note: Dictionary = notes[idx[first + k]]
-		if not pattern.syllables.is_empty() and note.instr != pattern.syllables[k]:
+		if not _note_ok(pattern, k, note, partial_last and k == count - 1):
 			return []
 		var on := pattern.onset(k) * bd
 		var tol := _tol(pattern, k)
@@ -423,7 +463,7 @@ func _track_progress(time: float, matched: RhythmPattern) -> void:
 		for k in range(mini(pattern.size() - 1, idx.size()), 0, -1):
 			if k < best_k:
 				break
-			var fit := _fit(pattern, idx, k, false)
+			var fit := _fit(pattern, idx, k, false, true)
 			if not fit.is_empty():
 				if k > best_k:
 					best_k = k
@@ -447,7 +487,7 @@ func _track_progress(time: float, matched: RhythmPattern) -> void:
 			found.clear()
 			var bd := beat_duration()
 			for pattern in patterns:
-				if not pattern.syllables.is_empty() and pattern.syllables[0] == note.instr:
+				if not pattern.syllables.is_empty() and _note_ok(pattern, 0, note, true):
 					var on := time - pattern.onset(0) * bd
 					var tol := _tol(pattern, 0)
 					found.append({"pattern": pattern, "lo": on - tol, "hi": on + tol})
@@ -514,7 +554,7 @@ func _break_reason(note: Dictionary, time: float) -> Dictionary:
 	var c: Dictionary = progress_candidates[0]
 	var wrong := true
 	for cand in progress_candidates:
-		if cand.pattern.syllables[progress_step] == note.instr:
+		if _note_ok(cand.pattern, progress_step, note, true):
 			c = cand
 			wrong = false
 			break

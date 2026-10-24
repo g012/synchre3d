@@ -103,8 +103,9 @@ console). The camera follows both fighters and zooms out a little when they are 
    tempo carries over to the following rounds.)
 2. **Chant.** Spells come in **families** that share the start and the end of their chant;
    each spell has its own middle. Chant the start and the end alone for a quick **level 1**
-   (the family's first spell), add the spell's middle once for **level 2**, twice for
-   **level 3**: longer chants, stronger spells.
+   (the family's first spell), add the spell's middle for **level 2**, and for **level 3**
+   play one of the middle's notes as a **chord** (neighbouring face buttons together: A+B,
+   B+Y, X+Y, A+X, or a triple): same length, harder, stronger.
 
    In play right now (the others wait in the book, disabled):
 
@@ -115,9 +116,8 @@ console). The camera follows both fighters and zooms out a little when they are 
    | Hex | B X … A | **Swap** (X X), Minion (B Y) |
 
    The first enabled spell of each family (in bold) also has level 1. Rhythms are written
-   as note lengths (♪ croche, ♩ noire, ♩. noire pointée) and the parts simply follow each
-   other: Push level 1 is A♪ A♩ Y, level 2 A♪ A♩ B♪ X♩. Y, level 3 A♪ A♩ B♪ X♩. B♪ X♩. Y.
-   Every middle lasts whole beats, so a repeated middle is the same beat-aligned rhythm.
+   as note lengths (♪ croche, ♩ noire) and the parts simply follow each other: Push level 1
+   is A♪ A♩ Y, level 2 A♪ A♩ B♪ X♩ Y, level 3 A♪ A♩ B♪ (X+Y)♩ Y.
 
    **Push** is a beam: it shoots out at once (no travel time), shoves and hurts everyone
    along it, and grows longer and wider with each level. From level 2 the ground heaves up

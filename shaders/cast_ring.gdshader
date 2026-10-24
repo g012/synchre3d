@@ -12,7 +12,8 @@ global uniform float beat_time;
 
 // Fighter color (palette index).
 uniform int palette_index = 4;
-// Buttons validated so far (0 A, 1 B, 2 X, 3 Y), and the number of syllables of the chant
+// Notes validated so far as button bitmasks (bit 0 A, 1 B, 2 X, 3 Y; a chord has several,
+// drawn as a pip split in colored sectors), and the number of notes of the chant
 // (0 = not chanting).
 uniform int pips[12];
 uniform int pip_count = 0;
@@ -29,6 +30,28 @@ void vertex() {
 	vec4 v = MODELVIEW_MATRIX * vec4(VERTEX, 1.0);
 	v.z += DEPTH_BIAS;
 	POSITION = PROJECTION_MATRIX * v;
+}
+
+int bit_count(int mask) {
+	int c = 0;
+	for (int b = 0; b < 4; b++) {
+		c += (mask >> b) & 1;
+	}
+	return c;
+}
+
+// The `n`-th set button of `mask`.
+int nth_button(int mask, int n) {
+	int c = 0;
+	for (int b = 0; b < 4; b++) {
+		if (((mask >> b) & 1) == 1) {
+			if (c == n) {
+				return b;
+			}
+			c++;
+		}
+	}
+	return 0;
 }
 
 int button_palette(int b) {
@@ -72,7 +95,11 @@ void fragment() {
 			float d = length(p - centre);
 			if (i < pip_count) {
 				if (d < PIP_R) {
-					c = palette_color(button_palette(pips[i]), d < PIP_R * 0.55 ? 3 : 2);
+					// One sector per button of a chord.
+					int n = max(bit_count(pips[i]), 1);
+					vec2 q = p - centre;
+					int sector = min(int(floor((atan(q.y, q.x) + PI) / TAU * float(n))), n - 1);
+					c = palette_color(button_palette(nth_button(pips[i], sector)), d < PIP_R * 0.55 ? 3 : 2);
 					on = true;
 				} else if (d < PIP_R + 0.03) {
 					c = palette_color(0, 1);

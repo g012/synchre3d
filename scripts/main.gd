@@ -82,6 +82,7 @@ func _ready() -> void:
 	fighters[1].team = 1
 	hud.set_names("Pip", 4, "Mog", 11)
 	spells.setup(arena, fx, camera, fighters)
+	DancingFlower.fx_sprites = fx
 	_frame_arena()
 	arena.rebuilt.connect(_frame_arena)
 	beat_clock = BeatClock.new()

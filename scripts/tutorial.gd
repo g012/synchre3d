@@ -123,7 +123,8 @@ func _process(delta: float) -> void:
 			if b < demo_start:
 				message = "LISTEN...  %d" % ceili(demo_start - b)
 			while _demo_next < p.size() and b >= demo_start + p.onset(_demo_next) - p.onset(0):
-				caster.sing(p.syllables[_demo_next])
+				for button in SpellDefinition.mask_buttons(p.masks[_demo_next]):
+					caster.sing(button)
 				demo_lit = _demo_next
 				_demo_next += 1
 				message = "LISTEN..."

@@ -7,6 +7,9 @@ const A := 0
 const B := 1
 const X := 2
 const Y := 3
+## Spread of a chord's presses in tests, and the game's chord window.
+const CHORD_SPREAD := 0.02
+const CHORD_WINDOW := 0.08
 
 var _failures := 0
 var _checks := 0
@@ -39,6 +42,7 @@ func _init() -> void:
 	test_extra_tap_restarts_incantation()
 	test_multiple_spells_distinguished()
 	test_precision()
+	test_chords()
 	test_shared_openings_progress()
 	test_shared_opening_timeout_waits_for_slowest()
 	test_tempo_slide_followed()
@@ -96,12 +100,17 @@ func count_in(e: RhythmEngine, t0: float, beat: float, instr := A) -> float:
 
 
 ## Plays `pattern` with its measure starting at `m`; optional per-note offsets (seconds).
+## Chords (pattern.masks) are pressed button after button, `CHORD_SPREAD` apart.
 func play(e: RhythmEngine, pattern: RhythmPattern, m: float, beat: float, offsets := {}, buttons := PackedInt32Array()) -> float:
 	var last := 0.0
 	for k in pattern.size():
 		var t: float = m + pattern.onset(k) * beat + offsets.get(k, 0.0)
-		var b := buttons[k] if k < buttons.size() else pattern.syllables[k]
-		e.press(b, t)
+		if k >= buttons.size() and not pattern.masks.is_empty():
+			var bs := SpellDefinition.mask_buttons(pattern.masks[k])
+			for i in bs.size():
+				e.press(bs[i], t + i * CHORD_SPREAD)
+		else:
+			e.press(buttons[k] if k < buttons.size() else pattern.syllables[k], t)
 		last = t
 	return last
 
@@ -573,9 +582,10 @@ func test_spellbook() -> void:
 	check(book != null and book.active().size() >= 3, "spellbook: at least 3 spells in play (%d)" % book.active().size())
 	check(book.spells.size() == 11, "spellbook keeps 11 spells including ideas (%d)" % book.spells.size())
 	var push: SpellDefinition = book.find(&"push")
-	check(push.button_string(1) == "A A Y" and push.button_string(2) == "A A B X Y" and push.button_string(3) == "A A B X B X Y",
-		"push levels: start + end, then the middle once, twice (%s / %s / %s)" % [push.button_string(1), push.button_string(2), push.button_string(3)])
-	# Written as note lengths: A croche, A noire, [B croche, X noire] per level, Y.
+	check(push.button_string(1) == "A A Y" and push.button_string(2) == "A A B X Y" and push.button_string(3) == "A A B X+Y Y",
+		"push levels: start + end, + middle, + middle with a chord (%s / %s / %s)" % [push.button_string(1), push.button_string(2), push.button_string(3)])
+	# Written as note lengths: A croche, A noire, B croche, X noire, Y; level 3 has the same
+	# rhythm (chords make it harder, not longer).
 	var onsets := []
 	for level in [1, 2, 3]:
 		var p := push.to_pattern(level)
@@ -583,18 +593,21 @@ func test_spellbook() -> void:
 		for k in p.size():
 			o.append(p.onset(k) - p.onset(0))
 		onsets.append(o)
-	check(onsets == [[0.0, 0.5, 1.5], [0.0, 0.5, 1.5, 2.0, 3.5], [0.0, 0.5, 1.5, 2.0, 3.5, 4.0, 5.5]],
-		"push rhythm: middles inserted as B croche X dotted noire (%s)" % [onsets])
-	# Every middle lasts a whole number of beats, so a repeated middle comes back on the same
-	# beat alignment (odd half-beat middles are kept for stronger spells later).
-	var odd := []
+	check(onsets == [[0.0, 0.5, 1.5], [0.0, 0.5, 1.5, 2.0, 3.0], [0.0, 0.5, 1.5, 2.0, 3.0]],
+		"push rhythm: B croche X noire inserted, level 3 as long as level 2 (%s)" % [onsets])
+	var bad_chords := []
 	for sp in book.spells:
-		var total := 0.0
-		for v in sp.middle_lengths:
-			total += v
-		if not is_equal_approx(fposmod(total, 1.0), 0.0):
-			odd.append(sp.id)
-	check(odd.is_empty(), "middles last whole beats (odd: %s)" % [odd])
+		var m3 := sp.masks(3)
+		var m2 := sp.masks(2)
+		var has_chord := false
+		for k in m3.size():
+			if m3[k] != m2[k]:
+				has_chord = true
+				if not m3[k] in SpellDefinition.CHORDS or (m3[k] & m2[k]) == 0:
+					bad_chords.append([sp.id, k])
+		if not has_chord:
+			bad_chords.append([sp.id, "no chord"])
+	check(bad_chords.is_empty(), "level 3 adds allowed chords containing the note's syllable (%s)" % [bad_chords])
 	var families := {}
 	for sp in book.spells:
 		families[sp.family] = true
@@ -609,6 +622,7 @@ func test_spellbook() -> void:
 		for i in all.size():
 			var e := make_engine(all)
 			e.tolerance_beats = window
+			e.chord_window = CHORD_WINDOW
 			e.set_fixed_tempo(100.0, 0.0)
 			_log.clear()
 			play(e, all[i], 10.0, 0.6)
@@ -646,6 +660,45 @@ func test_precision() -> void:
 	game.set_fixed_tempo(100.0, 0.0)
 	play(game, p, 10.0, 0.6, offs)
 	check(has("match push_2"), "and casts with the game's single 0.2-beat window")
+
+
+func test_chords() -> void:
+	var book: SpellBook = load("res://assets/spells/spellbook.tres")
+	var push: SpellDefinition = book.find(&"push")
+	var ps: Array[RhythmPattern] = [push.to_pattern(1), push.to_pattern(2), push.to_pattern(3)]
+	var p3 := ps[2]
+	var engine := func() -> RhythmEngine:
+		var e := make_engine(ps)
+		e.tolerance_beats = 0.2
+		e.chord_window = CHORD_WINDOW
+		e.set_fixed_tempo(100.0, 0.0)
+		return e
+	# The chord, its second button a few ms late: level 3.
+	var e: RhythmEngine = engine.call()
+	play(e, p3, 10.0, 0.6)
+	check(has("match push_3") and not has("fail"), "A A B X+Y Y casts push level 3: %s" % [_log])
+	# The chord's other button first (Y before X): still no fizzle mid-chant, level 3.
+	e = engine.call()
+	for k in p3.size():
+		var t := 10.0 + (p3.onset(k) - p3.onset(0)) * 0.6
+		if k == 3:
+			e.press(Y, t)
+			e.press(X, t + 0.04)
+		else:
+			e.press(p3.syllables[k], t)
+	check(has("match push_3") and not has("fail"), "chord pressed Y first: level 3, no fizzle: %s" % [_log])
+	# Just the X: that's level 2.
+	e = engine.call()
+	play(e, p3, 10.0, 0.6, {}, p3.syllables)
+	check(has("match push_2") and not has("match push_3"), "without the chord: level 2: %s" % [_log])
+	# Buttons too far apart are two notes, not a chord: the chant breaks.
+	e = engine.call()
+	for k in p3.size():
+		var t := 10.0 + (p3.onset(k) - p3.onset(0)) * 0.6
+		e.press(p3.syllables[k], t)
+		if k == 3:
+			e.press(Y, t + 0.15)
+	check(not has("match push_3"), "X then Y 150 ms later is not a chord: %s" % [_log])
 
 
 # ------------------------------------------------------------------------------ tempo slides
@@ -738,6 +791,7 @@ func _pattern(e: RhythmEngine, name: String) -> RhythmPattern:
 ## once its middle starts, and casts level 2 without ever fizzling.
 func test_shared_openings_progress() -> void:
 	var e := make_engine(_whole_book())
+	e.chord_window = CHORD_WINDOW
 	e.set_fixed_tempo(100.0, 0.0)
 	var push2 := _pattern(e, "push_2")
 	var seen: Array = []
@@ -762,6 +816,7 @@ func test_shared_openings_progress() -> void:
 func test_shared_opening_timeout_waits_for_slowest() -> void:
 	var e := make_engine(_whole_book())
 	e.tolerance_beats = 0.2
+	e.chord_window = CHORD_WINDOW
 	e.set_fixed_tempo(100.0, 0.0)
 	var snare := _pattern(e, "snare_2")
 	var m := 10.0

@@ -24,6 +24,9 @@ const DCROCHE3 := 1.0 / 6.0
 var pattern_name := ""
 var beats := PackedFloat32Array()
 var syllables := PackedInt32Array()
+## Optional buttons of each note as bitmasks (bit n = button n): lets a note be a chord.
+## When set, it replaces `syllables` for matching (`syllables` keeps one button per note).
+var masks := PackedInt32Array()
 ## Arbitrary user data (e.g. the SpellDefinition this pattern casts).
 var payload: Variant = null
 ## Optional power level of the payload this pattern casts (spell families).

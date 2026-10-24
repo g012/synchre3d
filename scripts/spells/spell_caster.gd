@@ -33,6 +33,8 @@ const FIZZLE_SOUND := preload("res://assets/audio/fizzle.wav")
 ## whatever the note's length (the original Synchre used 20% of each note's own length).
 ## Generous, to forgive mistakes; precision then scales the spell's power (`power_range`).
 @export var timing_window := 0.2
+## Buttons pressed within this many seconds of each other count as one chord (level 3).
+@export var chord_window := 0.08
 ## Power multiplier of a cast at precision 0 and 1.
 @export var power_range := Vector2(0.55, 1.0)
 ## Metronome clicks once the tempo is locked (the original's behavior).
@@ -63,6 +65,7 @@ var _press_real := 0.0
 func _ready() -> void:
 	engine = RhythmEngine.new(book.patterns())
 	engine.tolerance_beats = timing_window
+	engine.chord_window = chord_window
 	engine.note_judged.connect(_on_judged)
 	engine.progress_changed.connect(_on_progress)
 	engine.incantation_failed.connect(_on_failed)
@@ -134,10 +137,18 @@ func candidates() -> Array[SpellDefinition]:
 	return out
 
 
-## Buttons validated so far in the incantation in progress.
+## Notes validated so far in the incantation in progress, as button bitmasks (chords have
+## several bits).
 func chanted() -> PackedInt32Array:
 	var p := engine.progress_pattern
-	return p.syllables.slice(0, engine.progress_step) if p else PackedInt32Array()
+	if not p:
+		return PackedInt32Array()
+	if not p.masks.is_empty():
+		return p.masks.slice(0, engine.progress_step)
+	var out := PackedInt32Array()
+	for s in p.syllables.slice(0, engine.progress_step):
+		out.append(1 << s)
+	return out
 
 
 ## Notes of the leading candidate chant (0 when idle).

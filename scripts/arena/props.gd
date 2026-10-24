@@ -99,8 +99,13 @@ func relocate(node: Node3D, xz: Vector2) -> void:
 			continue
 		var old: Vector2 = e.xz
 		e.xz = xz
-		e.y = _arena.height_at(xz)
+		# Into a pond: it floats at the surface, delighted.
+		var wet := _arena.water_depth(xz) > 0.05
+		e.floats = wet
+		e.y = maxf(_arena.height_at(xz), Arena.WATER_LEVEL - 0.15) if wet else _arena.height_at(xz)
 		node.position = Vector3(xz.x, e.y, xz.y)
+		if node is DancingFlower:
+			(node as DancingFlower).happy = wet
 		var lists: Array = [_arena.decor_footprints]
 		if e.has("cell") and _cells.has(e.cell):
 			lists.append(_cells[e.cell].decor)
@@ -121,6 +126,8 @@ func _on_ground_changed(rect: Rect2) -> void:
 		if not grown.has_point(e.xz):
 			continue
 		var y := _arena.height_at(e.xz)
+		if e.get("floats", false):
+			y = maxf(y, Arena.WATER_LEVEL - 0.15)
 		if is_equal_approx(y, e.y):
 			continue
 		e.y = y

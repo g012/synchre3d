@@ -2,7 +2,8 @@ class_name TutorialCard
 extends Control
 ## The tutorial's lesson card, top centre, on the low-res pixel grid:
 ##
-##   LESSON 2/13          PUSH  LEVEL 2            [x][x][ ]   <- good casts so far
+##   LESSON 2/13          PUSH  LEVEL 3            [x][x][ ]   <- good casts so far
+##                     Y                                       <- chords stacked upward
 ##   A  A     B  X     Y                                       <- the chant, spaced by its rhythm
 ##   '  '  '  '  '  '  '                                          (one tick per beat)
 ##   YOUR TURN!  START ON ANY BEAT                             <- listen / feedback
@@ -12,7 +13,9 @@ extends Control
 const GLYPH := 11
 const BEAT_PX := 26.0
 const W := 300
-const H := 66
+const H := 86
+## Baseline row of the chant (chords stack upward from it).
+const ROW := 42
 
 var tutorial: Tutorial
 var font: Font
@@ -55,14 +58,21 @@ func _draw() -> void:
 	var x0 := floorf((W - span * BEAT_PX - GLYPH) * 0.5)
 	var lit := _lit_count(p)
 	for b in int(span) + 1:
-		draw_rect(Rect2(x0 + b * BEAT_PX + GLYPH * 0.5, 34, 1, 3), Color(1, 1, 1, 0.35))
+		draw_rect(Rect2(x0 + b * BEAT_PX + GLYPH * 0.5, ROW + GLYPH + 4, 1, 3), Color(1, 1, 1, 0.35))
 	for k in p.size():
 		var x := x0 + (p.onset(k) - p.onset(0)) * BEAT_PX
 		var on := k < lit or k == tutorial.demo_lit
-		_glyph(Vector2(roundf(x), 19), p.syllables[k], on)
+		# A chord: its buttons stacked, the note's own one at the bottom.
+		var buttons := SpellDefinition.mask_buttons(p.masks[k])
+		var row := 0
+		for b in buttons:
+			if b != p.syllables[k]:
+				row += 1
+				_glyph(Vector2(roundf(x), ROW - row * (GLYPH + 1)), b, on)
+		_glyph(Vector2(roundf(x), ROW), p.syllables[k], on)
 
-	_text(Vector2(6, 50), tutorial.message, tutorial.message_color)
-	_text(Vector2(6, 59), "D-PAD </> (P/N): LESSON    UP (H): LISTEN AGAIN", Color(1, 1, 1, 0.4))
+	_text(Vector2(6, 72), tutorial.message, tutorial.message_color)
+	_text(Vector2(6, 81), "D-PAD </> (P/N): LESSON    UP (H): LISTEN AGAIN", Color(1, 1, 1, 0.4))
 
 
 ## Syllables done: the demo's progress while listening, else how far the player's chant
@@ -74,7 +84,7 @@ func _lit_count(p: RhythmPattern) -> int:
 	if chanted.size() > p.size():
 		return 0
 	for k in chanted.size():
-		if chanted[k] != p.syllables[k]:
+		if chanted[k] != p.masks[k]:
 			return 0
 	return chanted.size()
 

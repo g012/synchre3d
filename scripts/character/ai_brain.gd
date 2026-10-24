@@ -153,11 +153,13 @@ func _update_chant(c: ArenaCharacter, delta: float) -> void:
 	var start := ceilf(b * 2.0 + 0.5) * 0.5
 	var flub := _rng.randi_range(1, p.size() - 1) if _rng.randf() < flub_chance else -1
 	for k in p.size():
-		var button := p.syllables[k]
+		var buttons := SpellDefinition.mask_buttons(p.masks[k]) if not p.masks.is_empty() else PackedInt32Array([p.syllables[k]])
 		if k == flub:
-			button = (button + _rng.randi_range(1, 3)) % 4
+			buttons = PackedInt32Array([(p.syllables[k] + _rng.randi_range(1, 3)) % 4])
 		var wobble := _rng.randfn(0.0, timing_jitter * p.beats[k]) if k > 0 else 0.0
-		_plan.append({"beat": start + p.onset(k) - p.onset(0) + wobble, "button": button})
+		# A chord's buttons go together (same beat: pressed on the same tick).
+		for button in buttons:
+			_plan.append({"beat": start + p.onset(k) - p.onset(0) + wobble, "button": button})
 	_plan_spell = spell
 
 
