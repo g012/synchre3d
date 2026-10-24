@@ -103,6 +103,11 @@ func syllable(button: int, time: float) -> void:
 		engine.press(button, _press_warped)
 
 
+## Sings syllable `button` without chanting it (the tutorial's demonstration).
+func sing(button: int) -> void:
+	_play_voice(SYLLABLE_SOUNDS[button], voice_volume_db, voice_pitch)
+
+
 func syllable_released(button: int, time: float) -> void:
 	if listening:
 		engine.release(button, _warp(time))

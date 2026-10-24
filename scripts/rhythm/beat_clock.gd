@@ -26,7 +26,9 @@ const BPM_RANGE := Vector2(80.0, 160.0)
 static var instance: BeatClock
 
 @export var metronome := true
-@export var volume_db := -9.0
+## Just above the chanted syllables (their loudness at SpellCaster.voice_volume_db sits about
+## 2 dB under the click's at this setting), so the beat stays audible over the chanting.
+@export var volume_db := 2.0
 
 ## The match tempo (what the rhythm engines are locked to).
 var bpm := 0.0

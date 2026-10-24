@@ -29,6 +29,14 @@ The game opens on a **menu** (stick / D-pad / arrows to choose, A / Enter / Star
   (100) runs out. The top of the screen shows health, time and kills; after a run, Start
   plays again. It is meant for practice: moving and chanting at the same time, then doing it
   from memory with the spell sheets hidden (**R3 / F2** toggles them).
+- **Tutorial: learn the spells.** Pip alone on the island with three training dummies, one
+  lesson per spell in play and per level (13 right now). Each lesson starts with the game
+  chanting the spell itself on the beat, in Pip's voice, its syllables lighting up on a card
+  at the top (the chant is drawn spaced by its rhythm, one tick per beat). Then it's your
+  turn: cast it 3 times (start on any beat) to move on. The card lights your syllables as
+  you chant and tells you how it went: the precision, why a chant fizzled, or which spell
+  you cast instead. D-pad left / right (P / N) changes lesson, D-pad up (H) listens again.
+  The dummies come back when knocked away or into a hole, and so do you.
 - **Duel vs CPU** and **Duel vs human**: the island duels described below.
 
 **Start / Back / Esc** pauses: resume, restart (a new survival run, or the duel from 0 - 0
@@ -55,6 +63,7 @@ Project Settings.
 | Hold: strafe (keep facing). Duels: also manual aim while held (auto-aim otherwise); survival: aim is always manual | LT | Q | Numpad − |
 | Pause menu (resume / restart / quit) | Start or Back | R or Esc | |
 | Hide / show the spell sheets | R3 (right stick click) | F2 | |
+| Tutorial: previous / next lesson, listen again | D-pad left / right, up | P / N, H | |
 | Fullscreen / debug: hide outline pass | | F11 / F1 | |
 
 Keyboard keys are bound by physical position, so they work the same on AZERTY. In 1-player
@@ -350,7 +359,8 @@ Spell effects are separate from recognition and could be resolved authoritativel
 | Spells and families (buttons, rhythm, effect, color) | `assets/spells/spellbook.tres` |
 | Timing window (beats, every note), precision-to-power range | `timing_window`, `power_range` on `scripts/spells/spell_caster.gd` |
 | Pit radius and placement, Mend Earth reach, mound distance and knockback | Exported vars on `scripts/spells/spell_effects.gd` |
-| Sounds | `python3 tools/gen_audio.py` (numpy), volumes on `spell_caster.gd` / `spell_effects.gd` |
+| Sounds | `python3 tools/gen_audio.py` (numpy), volumes on `spell_caster.gd` / `spell_effects.gd`; metronome volume `volume_db` on `scripts/rhythm/beat_clock.gd` (set just above the chanting) |
+| Tutorial: casts per lesson, dummy placement | `SUCCESSES`, `DUMMY_*` in `scripts/tutorial.gd` |
 | Push bolt speed, range, size, strength | `scripts/spells/magic_bolt.gd` |
 | Rhythm tolerance, blank length, tempo from spell openings | `scripts/rhythm/rhythm_engine.gd` (`TOLERANCE` as in the original; `blank_beats`, `tempo_from_openings`) |
 | AI reaction time, edge fear, chanting rate / timing wobble / flub chance | `scripts/character/ai_brain.gd` |

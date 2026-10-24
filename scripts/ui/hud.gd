@@ -26,6 +26,7 @@ var _menu_plate: ColorRect
 var sheets_visible := true
 var _menu_title: Label
 var _menu_items: Array[Label] = []
+var _tutorial_card: TutorialCard
 var _menu_footer: Label
 
 
@@ -81,7 +82,7 @@ func _ready() -> void:
 	var gap := Control.new()
 	gap.custom_minimum_size = Vector2(0, 10)
 	_menu.add_child(gap)
-	for i in 3:
+	for i in 4:
 		var l := _label(16)
 		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		_menu.add_child(l)
@@ -130,6 +131,8 @@ func _layout() -> void:
 	_sub.size = Vector2(s.x, 10)
 	_sub.position = Vector2(0, _message_base_y + 32)
 	_hint.position = Vector2(6, s.y - 14)
+	if _tutorial_card:
+		_tutorial_card.position = Vector2(floorf((s.x - _tutorial_card.size.x) * 0.5), 6)
 	if _menu:
 		_menu.size = Vector2(s.x, 0)
 		var mh := _menu.get_combined_minimum_size().y
@@ -167,9 +170,24 @@ func set_mode(mode: String) -> void:
 		"cpu":
 			_mode.text = "DUEL VS CPU"
 			_hint.text = "STICK/WASD MOVE  ABXY (KLJI) CHANT  RT/SPC JUMP  LB/SHIFT DASH  RB/E SHOVE  LT/Q STRAFE  START PAUSE"
+		"tutorial":
+			_mode.text = "TUTORIAL"
+			_hint.text = "STICK/WASD MOVE  ABXY (KLJI) CHANT  RT/SPC JUMP  LB/SHIFT DASH  RB/E SHOVE  LT/Q STRAFE  START PAUSE"
 		"survival":
 			_mode.text = "SURVIVAL"
 			_hint.text = "STICK/WASD MOVE  ABXY (KLJI) CHANT  RT/SPC JUMP  LB/SHIFT DASH  RB/E SHOVE  LT/Q STRAFE  START PAUSE"
+
+
+## Shows the tutorial's lesson card (null hides it).
+func set_tutorial(t: Tutorial) -> void:
+	if _tutorial_card:
+		_tutorial_card.queue_free()
+		_tutorial_card = null
+	if t:
+		_tutorial_card = TutorialCard.new()
+		_tutorial_card.setup(t, _font, _palette)
+		_root.add_child(_tutorial_card)
+	_layout()
 
 
 ## Survival readout at the top (health, time, kills).

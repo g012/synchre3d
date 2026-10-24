@@ -5,6 +5,8 @@ extends Node
 ##   reset) and wins.
 ## * Single player (survival): Pip alone on the endless field (Arena.endless) while the
 ##   Survival director sends enemies, until Pip falls or runs out of health.
+## * Tutorial: Pip alone on the island with training dummies, one lesson per spell and level
+##   (see Tutorial).
 ## Start / Back / Esc pauses (resume, restart, quit to the menu); so does leaving the window.
 ##
 ## Tempo: before the first round player 1 taps four even beats (the original Synchre
@@ -21,10 +23,11 @@ const PIP_MODEL := preload("res://assets/models/pip.glb")
 const MOG_MODEL := preload("res://assets/models/mog.glb")
 const SPELLBOOK := preload("res://assets/spells/spellbook.tres")
 
-enum Mode { MENU, SURVIVAL, DUEL_CPU, DUEL_HUMAN }
-enum Phase { MENU, TEMPO, INTRO, FIGHT, ROUND_OVER, RUN, GAME_OVER }
+enum Mode { MENU, SURVIVAL, TUTORIAL, DUEL_CPU, DUEL_HUMAN }
+enum Phase { MENU, TEMPO, INTRO, FIGHT, ROUND_OVER, RUN, GAME_OVER, LESSON }
 
-const MENU_ITEMS: Array[String] = ["SINGLE PLAYER - SURVIVAL", "DUEL VS CPU", "DUEL VS HUMAN"]
+const MENU_ITEMS: Array[String] = ["SINGLE PLAYER - SURVIVAL", "TUTORIAL - LEARN THE SPELLS", "DUEL VS CPU", "DUEL VS HUMAN"]
+const MENU_MODES: Array[Mode] = [Mode.SURVIVAL, Mode.TUTORIAL, Mode.DUEL_CPU, Mode.DUEL_HUMAN]
 const PAUSE_ITEMS: Array[String] = ["RESUME", "RESTART", "QUIT TO MENU"]
 ## Survival: Pip's health.
 const SURVIVAL_HP := 100.0
@@ -49,6 +52,7 @@ var scores := [0, 0]
 var fighters: Array[ArenaCharacter] = []
 var phase := Phase.MENU
 var survival: Survival
+var tutorial: Tutorial
 var _menu_index := 0
 var paused := false
 var _pause_index := 0
@@ -90,6 +94,13 @@ func _ready() -> void:
 	survival.fx = fx
 	survival.camera = camera
 	world.add_child(survival)
+	tutorial = Tutorial.new()
+	tutorial.name = "Tutorial"
+	tutorial.arena = arena
+	tutorial.fx = fx
+	tutorial.camera = camera
+	tutorial.book = SPELLBOOK
+	world.add_child(tutorial)
 	_camera_home = camera.focus
 	enter_menu()
 
@@ -103,6 +114,8 @@ func enter_menu() -> void:
 	phase = Phase.MENU
 	survival.stop()
 	survival.clear()
+	tutorial.stop()
+	hud.set_tutorial(null)
 	beat_clock.stop()
 	for c in casters:
 		if c:
@@ -139,12 +152,19 @@ func _start_mode(m: Mode) -> void:
 		arena.rebuild()
 		_bench(fighters[0], false)
 		_bench(fighters[1], true)
+	elif m == Mode.TUTORIAL:
+		_bench(fighters[0], false)
+		_bench(fighters[1], true)
 	else:
 		two_player = m == Mode.DUEL_HUMAN
 		for f in fighters:
 			_bench(f, false)
 	_apply_mode()
 	begin_tempo_setup()
+
+
+func _solo() -> bool:
+	return mode == Mode.SURVIVAL or mode == Mode.TUTORIAL
 
 
 ## A benched fighter is out of the game: hidden, frozen, untouchable.
@@ -185,8 +205,8 @@ func _make_fighter(display: String, model: PackedScene, color: int) -> ArenaChar
 
 
 func _apply_mode() -> void:
-	if mode == Mode.SURVIVAL:
-		_apply_survival()
+	if _solo():
+		_apply_solo()
 		return
 	fighters[0].opponent = fighters[1]
 	fighters[1].opponent = fighters[0]
@@ -215,8 +235,9 @@ func _apply_mode() -> void:
 	hud.set_rhythm_panels(casters, titles)
 
 
-## Survival: Pip alone, played with either pad or keyboard side, with health.
-func _apply_survival() -> void:
+## Survival and tutorial: Pip alone, on either pad or keyboard side, aiming by hand.
+## Survival adds health.
+func _apply_solo() -> void:
 	_set_human(0, true)
 	_set_human(1, false)
 	_bench(fighters[1], true) # again: its caster (and ring) may have just been created
@@ -227,11 +248,12 @@ func _apply_survival() -> void:
 	pip.brain = brain
 	pip.auto_aim = false
 	pip.opponent = null
-	pip.max_hp = SURVIVAL_HP
-	# Frozen until the tempo is set (see _start_run).
+	pip.max_hp = SURVIVAL_HP if mode == Mode.SURVIVAL else 0.0
+	# Frozen until the tempo is set (see _start_run, _start_lessons).
 	pip.auto_activate = false
-	survival.player = pip
-	hud.set_mode("survival")
+	if mode == Mode.SURVIVAL:
+		survival.player = pip
+	hud.set_mode("survival" if mode == Mode.SURVIVAL else "tutorial")
 	var solo: Array[SpellCaster] = [casters[0]]
 	hud.set_rhythm_panels(solo, ["P1"] as Array[String])
 
@@ -284,6 +306,7 @@ func begin_tempo_setup() -> void:
 			c.listening = false
 	survival.stop()
 	survival.clear()
+	tutorial.stop()
 	_reset_arena_and_spawn()
 	hud.set_panels_visible(false)
 	_show_tempo_message()
@@ -337,9 +360,25 @@ func _start_match() -> void:
 	# Straight into the action: everyone is already standing there.
 	if mode == Mode.SURVIVAL:
 		_start_run(false)
+	elif mode == Mode.TUTORIAL:
+		_start_lessons()
 	else:
 		_round_decided = false
 		_start_fight()
+
+
+## Tutorial: Pip is let go and the first lesson begins (dummies appear in front).
+func _start_lessons() -> void:
+	phase = Phase.LESSON
+	phase_time = 0.0
+	var pip := fighters[0]
+	pip.auto_activate = true
+	pip.set_frozen(false)
+	tutorial.player = pip
+	tutorial.caster = casters[0]
+	tutorial.start()
+	hud.set_tutorial(tutorial)
+	hud.hide_message()
 
 
 ## A survival run. Right after the tempo: Pip is already on the field, just let go.
@@ -373,6 +412,8 @@ func _reset_arena_and_spawn() -> void:
 		return
 	var sp := arena.layout.spawn_points
 	for i in fighters.size():
+		if _is_benched(fighters[i]):
+			continue
 		var p := sp[i % sp.size()]
 		var other := sp[(i + 1) % sp.size()]
 		var face := Vector3(other.x - p.x, 0.0, other.y - p.y)
@@ -407,7 +448,7 @@ func _on_landed(_c: ArenaCharacter) -> void:
 
 
 func _on_fell(c: ArenaCharacter) -> void:
-	if mode == Mode.SURVIVAL or phase != Phase.FIGHT or _round_decided:
+	if _solo() or phase != Phase.FIGHT or _round_decided:
 		return
 	# The round is decided the moment someone loses their footing.
 	_round_decided = true
@@ -429,6 +470,13 @@ func _on_eliminated(c: ArenaCharacter) -> void:
 	if mode == Mode.SURVIVAL:
 		if phase == Phase.RUN:
 			_game_over(c.hp <= 0.0 and c.max_hp > 0.0)
+		return
+	if mode == Mode.TUTORIAL:
+		# No losing in the tutorial: back to the start spot.
+		get_tree().create_timer(0.8).timeout.connect(func():
+			if mode == Mode.TUTORIAL and c.state == ArenaCharacter.State.OUT:
+				var sp := arena.layout.spawn_points
+				c.spawn(Vector3(sp[0].x, 0.0, sp[0].y), Vector3(sp[1].x - sp[0].x, 0.0, sp[1].y - sp[0].y)))
 		return
 	# Both fell before the round was decided (e.g. simultaneous): a draw.
 	if not _round_decided:
@@ -462,7 +510,7 @@ func _process(_delta: float) -> void:
 			_menu_index = posmod(_menu_index + moved, MENU_ITEMS.size())
 			_show_menu()
 		if _menu_accept(true):
-			_start_mode([Mode.SURVIVAL, Mode.DUEL_CPU, Mode.DUEL_HUMAN][_menu_index])
+			_start_mode(MENU_MODES[_menu_index])
 	elif paused:
 		var moved := _menu_move()
 		if moved != 0:
@@ -523,6 +571,8 @@ func _restart() -> void:
 		begin_tempo_setup()
 	elif mode == Mode.SURVIVAL:
 		_start_run()
+	elif mode == Mode.TUTORIAL:
+		tutorial.replay()
 	else:
 		scores = [0, 0]
 		hud.set_score(0, 0)
@@ -603,6 +653,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		else:
 			_set_paused(true)
 		get_viewport().set_input_as_handled()
+	elif mode == Mode.TUTORIAL and phase == Phase.LESSON and not paused and _tutorial_input(event):
+		get_viewport().set_input_as_handled()
 	elif (event is InputEventJoypadButton and event.pressed and (event as InputEventJoypadButton).button_index == JOY_BUTTON_RIGHT_STICK) \
 			or (event is InputEventKey and event.pressed and not event.echo and (event as InputEventKey).keycode == KEY_F2):
 		# Hide / show the spell sheets: practise chanting from memory.
@@ -615,8 +667,29 @@ func _unhandled_input(event: InputEvent) -> void:
 		post.visible = not post.visible
 
 
+## Tutorial navigation: D-pad left / right (P / N) previous / next lesson, up (H) listen again.
+func _tutorial_input(event: InputEvent) -> bool:
+	var b := -1
+	if event is InputEventJoypadButton and event.pressed:
+		b = (event as InputEventJoypadButton).button_index
+	var k := -1
+	if event is InputEventKey and event.pressed and not event.echo:
+		k = (event as InputEventKey).physical_keycode
+	if b == JOY_BUTTON_DPAD_LEFT or k == KEY_P:
+		tutorial.previous_lesson()
+	elif b == JOY_BUTTON_DPAD_RIGHT or k == KEY_N:
+		tutorial.next_lesson()
+	elif b == JOY_BUTTON_DPAD_UP or k == KEY_H:
+		tutorial.replay()
+	else:
+		return false
+	return true
+
+
 func _mcp_state() -> Dictionary:
 	return {"mode": Mode.keys()[mode], "phase": Phase.keys()[phase], "paused": paused, "scores": scores, "two_player": two_player,
 		"survival": {"time": snappedf(survival.time, 0.1), "kills": survival.kills, "alive": survival.alive_enemies()} if survival else {},
+		"tutorial": {"lesson": tutorial.index, "of": tutorial.lessons.size(), "step": Tutorial.Step.keys()[tutorial.step],
+			"successes": tutorial.successes, "message": tutorial.message} if tutorial and tutorial.running else {},
 		"bpm": beat_clock.current_bpm() if beat_clock else 0.0,
 		"decided": _round_decided, "message": hud._message.text if hud._message.visible else ""}
