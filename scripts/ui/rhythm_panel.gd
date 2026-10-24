@@ -2,7 +2,7 @@ class_name RhythmPanel
 extends Control
 ## Small rhythm/incantation readout for one caster, drawn on the low-res pixel grid.
 ##
-##   [tempo + beat lights]          | PUSH       A A B X . Y   <- spell sheets: each spell's
+##   [title, e.g. P1 / CPU]         | PUSH       A A B X . Y   <- spell sheets: each spell's
 ##   [last syllables + timing ticks]| SHOCKWAVE  A A . X . X . Y  level-2 chant on a beat
 ##   [result: PUSH LV2 87%]         | ---------                   timeline, grouped by family
 ##                                  | OPEN PIT   X Y Y Y . X      (shared start and end dimmed),
@@ -110,32 +110,12 @@ func _draw() -> void:
 		return
 	var now := PlayerInput.now_seconds()
 	var e := caster.engine
-	var clock := BeatClock.instance
 	var ink := Color(0.17, 0.13, 0.21, 0.72)
 	draw_rect(Rect2(Vector2.ZERO, size), ink)
 	draw_rect(Rect2(Vector2.ZERO, size), Color(1, 1, 1, 0.12), false, 1.0)
 
-	# --- tempo row
+	# --- title (the tempo and beat are shown once for everyone, at the top: BeatBar)
 	_text(Vector2(4, 9), title, Color.WHITE)
-	# Tempo readout after the title, whatever its width ("P1", "CPU"...).
-	var bpm_x := 4.0 + ceilf(font.get_string_size(title, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x) + 5.0
-	if clock and clock.running:
-		var bpm_text := "%d BPM" % roundi(clock.current_bpm())
-		_text(Vector2(bpm_x, 9), bpm_text, Color.WHITE)
-		var lx := bpm_x + ceilf(font.get_string_size(bpm_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x) + 6.0
-		var b := clock.beats_now()
-		var beat := floori(b)
-		var phase := b - beat
-		for k in 4:
-			var lit := posmod(beat, 4) == k
-			var c := PERFECT_COLOR if lit and phase < 0.35 else Color(1, 1, 1, 0.25 if not lit else 0.55)
-			draw_rect(Rect2(lx + k * 7, 4, 4 if k > 0 else 5, 4 if k > 0 else 5), c)
-	else:
-		var n := e.count_in_streak()
-		_text(Vector2(bpm_x, 9), "TAP 4 BEATS", Color(1, 1, 1, 0.8))
-		for k in 4:
-			draw_rect(Rect2(bpm_x + 66 + k * 5, 4, 3, 3), PERFECT_COLOR if k < n else Color(1, 1, 1, 0.2))
-
 	# Aim mode: auto or manual, and strafing while LT is held.
 	var ch := caster.character
 	if ch.strafe:

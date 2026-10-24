@@ -28,6 +28,7 @@ var _menu_title: Label
 var _menu_items: Array[Label] = []
 var _tutorial_card: TutorialCard
 var _spell_book: SpellBookView
+var _beat_bar: BeatBar
 var _menu_footer: Label
 
 
@@ -57,6 +58,11 @@ func _ready() -> void:
 		top.add_child(l)
 	top.resized.connect(func(): top.position.x = (_root.size.x - top.size.x) * 0.5)
 	_top = top
+
+	# The shared beat, under the score / status / lesson card (see _layout).
+	_beat_bar = BeatBar.new()
+	_beat_bar.setup(_font)
+	_root.add_child(_beat_bar)
 
 	# Survival: health, time and kills instead of names and score.
 	_status = _label(16)
@@ -135,8 +141,12 @@ func _layout() -> void:
 	if _spell_book:
 		_spell_book.position = Vector2(8, 8)
 		_spell_book.size = s - Vector2(16, 16)
+	var below := 30.0
 	if _tutorial_card:
 		_tutorial_card.position = Vector2(floorf((s.x - _tutorial_card.size.x) * 0.5), 6)
+		below = 6.0 + _tutorial_card.size.y + 4.0
+	if _beat_bar:
+		_beat_bar.position = Vector2(floorf((s.x - _beat_bar.size.x) * 0.5), below)
 	if _menu:
 		_menu.size = Vector2(s.x, 0)
 		var mh := _menu.get_combined_minimum_size().y

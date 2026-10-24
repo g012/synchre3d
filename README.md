@@ -156,6 +156,9 @@ console). The camera follows both fighters and zooms out a little when they are 
    one pip per syllable, clockwise from the top, lit in the button's color once validated,
    faint for the ones still to come. The CPU has one too.
 
+   The shared beat is shown once at the top, under the score: the tempo and four squares
+   (one per beat of the bar, the first a bit bigger) lighting up yellow on each beat.
+
    The rhythm panel (bottom-left; P2 bottom-right; the CPU's is compact) shows:
    - your last syllables with a timing tick for each: centred = on time, shifted left or blue
      = early, right or orange = late, red cross = out of tolerance
@@ -166,7 +169,7 @@ console). The camera follows both fighters and zooms out a little when they are 
      `too late`, `tempo lost`). A fizzle dissipates the magic in grey puffs.
 
 Every syllable has its own chanted voice (Ah, Bra, Ca and Da on the notes A3, C4, D4 and E4,
-so each incantation is a tiny melody), and each spell effect has its own sound (bolt
+so each incantation is a tiny melody); player 2 and the CPU sing them an octave lower, and each spell effect has its own sound (bolt
 whoosh, ground cracking open, earth mending with a chime, ground heaving up), plus a fizzle.
 They are synthesized by `tools/gen_audio.py`.
 

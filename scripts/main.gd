@@ -272,8 +272,8 @@ func _set_human(i: int, human: bool) -> void:
 		caster.effects = spells
 		caster.fx = fx
 		caster.metronome = false # the shared BeatClock keeps time
-		# Player 2 (or the CPU) sings a fifth (7 semitones) above player 1.
-		caster.voice_pitch = 1.0 if i == 0 else pow(2.0, 7.0 / 12.0)
+		# Player 2 (or the CPU) sings an octave below player 1: same notes, no clash.
+		caster.voice_pitch = 1.0 if i == 0 else 0.5
 		caster.listening = false
 		fighters[i].add_child(caster)
 		casters[i] = caster
