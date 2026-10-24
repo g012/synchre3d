@@ -3,6 +3,7 @@
 
     python3 tools/gen_audio.py
 
+* syl_*_low: the same four an octave lower (player 2 / CPU), same length and attack.
 * syl_ah / syl_bra / syl_ca / syl_da: the four chanted syllables (A/B/X/Y). Formant
   synthesis of a sung "a" on a different note each (A3 C4 D4 E4, so incantations are tiny
   melodies), with the consonant of each syllable: breathy onset, voiced b + rolled r,
@@ -267,3 +268,7 @@ if __name__ == "__main__":
     write("spell_mend", spell_mend())
     write("spell_raise", spell_raise())
     write("fizzle", fizzle())
+    # Player 2 / CPU: the same syllables an octave lower, rendered (not slowed down), so they
+    # keep the same length and attack. Last, so the seeded noise above stays unchanged.
+    for name, kind, f0 in [("syl_ah_low", "ah", 110.0), ("syl_bra_low", "bra", 130.81), ("syl_ca_low", "ca", 146.83), ("syl_da_low", "da", 164.81)]:
+        write(name, syllable(kind, f0))

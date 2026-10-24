@@ -23,6 +23,11 @@ signal pressed(button: int, time: float)
 const METRONOME_TICK := preload("res://assets/audio/metronome.wav")
 const METRONOME_START := preload("res://assets/audio/metronome_start.wav")
 ## One chanted syllable per button (A "Ah", B "Bra", X "Ca", Y "Da"), see tools/gen_audio.py.
+## The same syllables an octave lower (player 2 / CPU): rendered by the generator, so they keep
+## the same length and attack (a slowed-down pitch would drag).
+const SYLLABLE_SOUNDS_LOW: Array[AudioStream] = [
+	preload("res://assets/audio/syl_ah_low.wav"), preload("res://assets/audio/syl_bra_low.wav"),
+	preload("res://assets/audio/syl_ca_low.wav"), preload("res://assets/audio/syl_da_low.wav")]
 const SYLLABLE_SOUNDS: Array[AudioStream] = [
 	preload("res://assets/audio/syl_ah.wav"), preload("res://assets/audio/syl_bra.wav"),
 	preload("res://assets/audio/syl_ca.wav"), preload("res://assets/audio/syl_da.wav")]
@@ -46,6 +51,8 @@ var listening := true
 ## Chanted syllables: played the instant a button is pressed.
 @export var voice := true
 @export var voice_pitch := 1.0
+## Sing the low (octave-down) syllables.
+@export var low_voice := false
 @export var voice_volume_db := -4.0
 
 var character: ArenaCharacter
@@ -98,7 +105,7 @@ func _ready() -> void:
 ## jumping or being knocked back never blocks the incantation.
 func syllable(button: int, time: float) -> void:
 	if voice:
-		_play_voice(SYLLABLE_SOUNDS[button], voice_volume_db, voice_pitch)
+		_play_voice(_syllable_sound(button), voice_volume_db, voice_pitch)
 	if listening:
 		pressed.emit(button, time)
 		_press_real = time
@@ -108,7 +115,11 @@ func syllable(button: int, time: float) -> void:
 
 ## Sings syllable `button` without chanting it (the tutorial's demonstration).
 func sing(button: int) -> void:
-	_play_voice(SYLLABLE_SOUNDS[button], voice_volume_db, voice_pitch)
+	_play_voice(_syllable_sound(button), voice_volume_db, voice_pitch)
+
+
+func _syllable_sound(button: int) -> AudioStream:
+	return SYLLABLE_SOUNDS_LOW[button] if low_voice else SYLLABLE_SOUNDS[button]
 
 
 func syllable_released(button: int, time: float) -> void:

@@ -273,7 +273,7 @@ func _set_human(i: int, human: bool) -> void:
 		caster.fx = fx
 		caster.metronome = false # the shared BeatClock keeps time
 		# Player 2 (or the CPU) sings an octave below player 1: same notes, no clash.
-		caster.voice_pitch = 1.0 if i == 0 else 0.5
+		caster.low_voice = i == 1
 		caster.listening = false
 		fighters[i].add_child(caster)
 		casters[i] = caster

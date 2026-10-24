@@ -170,7 +170,7 @@ console). The camera follows both fighters and zooms out a little when they are 
      `too late`, `tempo lost`). A fizzle dissipates the magic in grey puffs.
 
 Every syllable has its own chanted voice (Ah, Bra, Ca and Da on the notes A3, C4, D4 and E4,
-so each incantation is a tiny melody); player 2 and the CPU sing them an octave lower, and each spell effect has its own sound (bolt
+so each incantation is a tiny melody); player 2 and the CPU sing them an octave lower, rendered as their own samples so they keep the same length and attack, and each spell effect has its own sound (bolt
 whoosh, ground cracking open, earth mending with a chime, ground heaving up), plus a fizzle.
 They are synthesized by `tools/gen_audio.py`.
 
