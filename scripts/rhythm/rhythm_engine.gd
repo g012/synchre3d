@@ -63,10 +63,12 @@ var blank_beats := BLANK_DURATION * 2
 var tempo_from_openings := true
 ## A tempo set from outside (`set_fixed_tempo`): never blanked, never re-detected.
 var fixed_tempo := false
-## Timing tolerance of each note, as a fraction of its own duration (the original's 0.2;
-## the arena game widens it and rewards precision instead, see `last_precision`).
+## Timing tolerance of each note, as a fraction of its own duration (the original's 0.2).
 ## The count-in rule always uses the original TOLERANCE.
 var tolerance := TOLERANCE
+## When > 0: the same window for every note, in beats, whatever its duration (the arena game
+## uses this and rewards precision instead, see `last_precision`); replaces `tolerance`.
+var tolerance_beats := 0.0
 ## Precision of the last matched pattern: 1 = every note dead on the beat grid that fits
 ## them best, 0 = every note at the edge of its tolerance.
 var last_precision := 1.0
@@ -296,6 +298,13 @@ func _lock_from_opening(time: float) -> bool:
 	return true
 
 
+## Timing window (seconds, either side) of note `k` of `pattern`.
+func _tol(pattern: RhythmPattern, k: int) -> float:
+	if tolerance_beats > 0.0:
+		return tolerance_beats * beat_duration()
+	return tolerance * pattern.beats[k] * beat_duration()
+
+
 func _set_bpm(value: float) -> void:
 	bpm = value
 	bpm_r = 1.0 / bpm if bpm > 0.0 else DEFAULT_BPM_R
@@ -306,7 +315,8 @@ func _set_bpm(value: float) -> void:
 ## Indices of the newest unconsumed taps that are young enough for `pattern` (oldest first),
 ## like the original's event_indices: stop at a consumed tap or past the capture window.
 func _recent(pattern: RhythmPattern, time: float) -> Array[int]:
-	var capture := pattern.length() * beat_duration() * (1.0 + tolerance)
+	var capture := (pattern.length() + tolerance_beats) * beat_duration() if tolerance_beats > 0.0 \
+		else pattern.length() * beat_duration() * (1.0 + tolerance)
 	var out: Array[int] = []
 	for i in range(notes.size() - 1, -1, -1):
 		if notes[i].consumed or time - notes[i].t > capture:
@@ -330,7 +340,7 @@ func _fit(pattern: RhythmPattern, idx: Array[int], count: int, final: bool) -> A
 		if not pattern.syllables.is_empty() and note.instr != pattern.syllables[k]:
 			return []
 		var on := pattern.onset(k) * bd
-		var tol := tolerance * pattern.beats[k] * bd
+		var tol := _tol(pattern, k)
 		lo = maxf(lo, note.t - on - tol)
 		hi = minf(hi, note.t - on + tol)
 	if final:
@@ -386,7 +396,7 @@ func _precision(pattern: RhythmPattern, idx: Array[int], fit: Array[float]) -> f
 	var err := 0.0
 	for k in idx.size():
 		var off: float = notes[idx[k]].t - (m + pattern.onset(k) * bd)
-		err += absf(off) / (tolerance * pattern.beats[k] * bd)
+		err += absf(off) / _tol(pattern, k)
 	return clampf(1.0 - err / idx.size(), 0.0, 1.0)
 
 
@@ -439,7 +449,7 @@ func _track_progress(time: float, matched: RhythmPattern) -> void:
 			for pattern in patterns:
 				if not pattern.syllables.is_empty() and pattern.syllables[0] == note.instr:
 					var on := time - pattern.onset(0) * bd
-					var tol := tolerance * pattern.beats[0] * bd
+					var tol := _tol(pattern, 0)
 					found.append({"pattern": pattern, "lo": on - tol, "hi": on + tol})
 					best_k = 1
 	if best_k == 0:
@@ -488,7 +498,7 @@ func _judge(pattern: RhythmPattern, step: int, time: float, note: Dictionary) ->
 		return j
 	var bd := beat_duration()
 	var expected := (prev[0] + prev[1]) * 0.5 + pattern.onset(step - 1) * bd
-	var tol := tolerance * pattern.beats[step - 1] * bd
+	var tol := _tol(pattern, step - 1)
 	j.offset = time - expected
 	j.tolerance = tol
 	if absf(j.offset) <= PERFECT_FRACTION * tol:
@@ -513,7 +523,7 @@ func _break_reason(note: Dictionary, time: float) -> Dictionary:
 	var p: RhythmPattern = c.pattern
 	var bd := beat_duration()
 	var expected: float = (c.lo + c.hi) * 0.5 + p.onset(progress_step) * bd
-	var tol := tolerance * p.beats[progress_step] * bd
+	var tol := _tol(p, progress_step)
 	var offset := time - expected
 	if wrong:
 		return {"text": "wrong syllable", "offset": offset, "tolerance": tol}
@@ -525,7 +535,7 @@ func _deadline(c: Dictionary) -> float:
 	var p: RhythmPattern = c.pattern
 	var bd := beat_duration()
 	var s := progress_step
-	var late_tol := tolerance * p.beats[s] * bd if s < p.size() - 1 else 0.0
+	var late_tol := _tol(p, s) if s < p.size() - 1 else 0.0
 	return c.hi + p.onset(s) * bd + late_tol
 
 

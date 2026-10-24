@@ -105,8 +105,9 @@ console). The camera follows both fighters and zooms out a little when they are 
    | Time | Y B … Y | **Quicken** (X X) |
    | Hex | B X … A | **Swap** (X X), Minion (B Y) |
 
-   The first enabled spell of each family (in bold) also has level 1: Push level 1 is just
-   A A Y, level 2 A A B X Y, level 3 A A B X B X Y.
+   The first enabled spell of each family (in bold) also has level 1. Rhythms are written
+   as note lengths (♪ croche, ♩ noire) and the parts simply follow each other: Push level 1
+   is A♪ A♩ Y, level 2 A♪ A♩ B♪ X♩ Y, level 3 A♪ A♩ B♪ X♩ B♪ X♩ Y.
 
    **Push** is a beam: it shoots out at once (no travel time), shoves and hurts everyone
    along it, and grows longer and wider with each level. From level 2 the ground heaves up
@@ -116,8 +117,9 @@ console). The camera follows both fighters and zooms out a little when they are 
    bigger, stronger, quicker ones wreathed in sparks at level 3. Rhythms, effects and per-level numbers
    are in the [spell book](docs/spellbook.md).
 
-   Timing is forgiving: each note may land within **40%** of its own duration (twice the
-   original Synchre's 20%), but **precision** scales the spell's power: a chant dead on the
+   Timing is forgiving: every note may land up to **0.2 beat** early or late (120 ms at
+   100 BPM), the same window whatever its length (the original Synchre allowed 20% of each
+   note's own length), but **precision** scales the spell's power: a chant dead on the
    beat casts at full power, a sloppy one down to 55% (`power_range` on `SpellCaster`).
    **A spell can start on any beat** (or between beats): the rhythm is checked relative to
    your own first syllable, as in the original.
@@ -346,7 +348,7 @@ Spell effects are separate from recognition and could be resolved authoritativel
 | Camera follow margin, max zoom-out | Exported vars on `scripts/render/pixel_camera.gd` |
 | Move speed, acceleration, jump velocity, air control, push strength, knockback friction, hit-stop | Exported vars on `scripts/character/character.gd` |
 | Spells and families (buttons, rhythm, effect, color) | `assets/spells/spellbook.tres` |
-| Timing tolerance, precision-to-power range | `timing_tolerance`, `power_range` on `scripts/spells/spell_caster.gd` |
+| Timing window (beats, every note), precision-to-power range | `timing_window`, `power_range` on `scripts/spells/spell_caster.gd` |
 | Pit radius and placement, Mend Earth reach, mound distance and knockback | Exported vars on `scripts/spells/spell_effects.gd` |
 | Sounds | `python3 tools/gen_audio.py` (numpy), volumes on `spell_caster.gd` / `spell_effects.gd` |
 | Push bolt speed, range, size, strength | `scripts/spells/magic_bolt.gd` |

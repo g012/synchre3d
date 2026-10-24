@@ -22,44 +22,57 @@ no chant is ever mistaken for another one, at any level (checked by `tests/test_
 with the whole book). While a chant is still ambiguous (a family's start), the gathered
 magic shows every spell it could become and narrows down as you go.
 
-**Precision:** each note may be off by up to 40% of its own duration; the chant's precision
-(100% = every note dead on the beat grid that fits it best) scales the spell's power from
-55% to 100%. The rhythm panel shows the result, e.g. `PUSH LV2 87%`.
+**Precision:** every note may be off by up to 0.2 beat either way (120 ms at 100 BPM),
+whatever its length; the chant's precision (100% = every note dead on the beat grid that fits
+it best) scales the spell's power from 55% to 100%. The rhythm panel shows the result, e.g.
+`PUSH LV2 87%`.
 
-Rhythms below are the gaps in beats before each note (the first note's lead-in is left out).
+**Rhythms** are written like sheet music, as the length of each syllable (until the next):
+♪ = croche (½ beat), ♩ = noire (1 beat). The parts simply follow each other; the final
+syllable has no length (the spell fires on it). Push, for example:
 
-## Force: A A … Y (A A ½ apart, Y 1 beat after the last note)
+| Level | Chant |
+|---|---|
+| 1 | A♪ A♩ Y |
+| 2 | A♪ A♩ B♪ X♩ Y |
+| 3 | A♪ A♩ B♪ X♩ B♪ X♩ Y |
+
+(In the data each part is a list of lengths: `start_lengths`, `middle_lengths`,
+`end_lengths`. The engine turns them into the gaps before each note that the original
+Synchre patterns use, plus a 1-beat lead-in that only sets how far back taps are looked for.)
+
+## Force: A♪ A♩ … Y
 
 | Spell | Middle | Level 1 / 2 / 3 chant | Effect by level |
 |---|---|---|---|
-| **Push** | B X (½, ½) | A A Y / A A B X Y / A A B X B X Y | A beam from the hands, at once (no travel): shoves and hurts everyone along it. Length 6 / 8 / 10.5, width 0.35 / 0.55 / 0.8, knockback 10 / 15 / 19 (the RB shove is 7.5). Props stop it. From level 2 the ground heaves up along both sides of it as it goes: one long ridge per side (a bump, a hill at level 3) whose front races along the beam, throwing enemies out sideways. |
-| Shockwave | X X (1, 1) | – / A A X X Y / A A X X X X Y | Blast around the caster pushing every enemy away. Radius 2.4 / 3.4 / 4.4, force ×0.8 / ×1 / ×1.2. |
+| **Push** | B♪ X♩ | A A Y / A A B X Y / A A B X B X Y | A beam from the hands, at once (no travel): shoves and hurts everyone along it. Length 6 / 8 / 10.5, width 0.35 / 0.55 / 0.8, knockback 10 / 15 / 19 (the RB shove is 7.5). Props stop it. From level 2 the ground heaves up along both sides of it as it goes: one long ridge per side (a bump, a hill at level 3) whose front races along the beam, throwing enemies out sideways. |
+| Shockwave | X♩ X♩ | – / A A X X Y / A A X X X X Y | Blast around the caster pushing every enemy away. Radius 2.4 / 3.4 / 4.4, force ×0.8 / ×1 / ×1.2. |
 
-## Earth: X Y … X (Y ½ after X, X 1 beat after the last note)
+## Earth: X♪ Y♩ … X
 
 | Spell | Middle | Level 1 / 2 / 3 chant | Effect by level |
 |---|---|---|---|
-| **Open Pit** | Y Y (½, ½) | X Y X / X Y Y Y X / X Y Y Y Y Y X | Digs in front: a mound sinks one step (two at level 3): mountain → hill → bump → flat; flat ground opens a pit of radius 0.6 / 0.85 / 1.1. |
-| Mend Earth | B A (1, ½) | – / X Y B A X / X Y B A B A X | Closes the nearest hole in a cone in front (where you faced, not where auto-aim turns you); with none, raises the ground ahead one step (two at level 3): bump → hill → mountain, shoving whoever stands there (×0.8 / ×1 / ×1.2). |
+| **Open Pit** | Y♪ Y♩ | X Y X / X Y Y Y X / X Y Y Y Y Y X | Digs in front: a mound sinks one step (two at level 3): mountain → hill → bump → flat; flat ground opens a pit of radius 0.6 / 0.85 / 1.1. |
+| Mend Earth | B♪ A♩ | – / X Y B A X / X Y B A B A X | Closes the nearest hole in a cone in front (where you faced, not where auto-aim turns you); with none, raises the ground ahead one step (two at level 3): bump → hill → mountain, shoving whoever stands there (×0.8 / ×1 / ×1.2). |
 
-## Time: Y B … Y (B ½ after Y, Y 1 beat after the last note)
+## Time: Y♪ B♩ … Y
 
 Tempo and speed: the shared tempo, or how fast fighters move.
 
 | Spell | Middle | Level 1 / 2 / 3 chant | Effect by level |
 |---|---|---|---|
-| **Hasten** | A X (½, ½) | Y B Y / Y B A X Y / Y B A X A X Y | The shared tempo slides up +10 / +20 / +30 BPM (max 160) over one bar, so a chant almost finished still lands. The new tempo carries over to the next rounds. |
-| Slow | B B (1, 1) | – / Y B B B Y / Y B B B B B Y | The shared tempo slides down −10 / −20 / −30 BPM (min 80) over one bar. |
-| Quicken | X X (½, ½) | – / Y B X X Y / Y B X X X X Y | The caster runs faster: ×1.27 / ×1.45 / ×1.63 for 4 / 8 / 12 beats. Green sparks trail behind. |
-| Snare | X B (1, 1) | – / Y B X B Y / Y B X B X B Y | A slow, heavy blob (7 u/s): whoever it hits moves at 65% / 50% / 38% speed for about 3.6 / 6 / 8.4 beats, dripping blue. |
+| **Hasten** | A♪ X♩ | Y B Y / Y B A X Y / Y B A X A X Y | The shared tempo slides up +10 / +20 / +30 BPM (max 160) over one bar, so a chant almost finished still lands. The new tempo carries over to the next rounds. |
+| Slow | B♩ B♩ | – / Y B B B Y / Y B B B B B Y | The shared tempo slides down −10 / −20 / −30 BPM (min 80) over one bar. |
+| Quicken | X♪ X♩ | – / Y B X X Y / Y B X X X X Y | The caster runs faster: ×1.27 / ×1.45 / ×1.63 for 4 / 8 / 12 beats. Green sparks trail behind. |
+| Snare | X♩ B♩ | – / Y B X B Y / Y B X B X B Y | A slow, heavy blob (7 u/s): whoever it hits moves at 65% / 50% / 38% speed for about 3.6 / 6 / 8.4 beats, dripping blue. |
 
-## Hex: B X … A (X ½ after B, A 1 beat after the last note)
+## Hex: B♪ X♩ … A
 
 | Spell | Middle | Level 1 / 2 / 3 chant | Effect by level |
 |---|---|---|---|
-| **Knockout** | Y (1) | B X A / B X Y A / B X Y Y A | Spinning star: the target is knocked out 2 / 4 / 6 beats. It can't move, jump, dash or shove (it can still chant), but it can be pushed. |
-| Swap | X X (½, ½) | – / B X X X A / B X X X X X A | Small, very fast ball: if it touches someone, caster and target trade places, and the target is dazed (knocked out, stars over its head) for 1.5 / 2.5 / 3.5 beats. Range 6 / 10 / 14. |
-| Minion | B Y (1, 1) | – / B X B Y A / B X B Y B Y A | Necromancy: shadowy doubles of the caster climb out of the ground in front, chase the nearest enemy and shove. Level 2: 2 small ones; level 3: 3 bigger, stronger, quicker ones wreathed in sparks. They crumble after 16 beats. No limit on how many. |
+| **Knockout** | Y♩ | B X A / B X Y A / B X Y Y A | Spinning star: the target is knocked out 2 / 4 / 6 beats. It can't move, jump, dash or shove (it can still chant), but it can be pushed. |
+| Swap | X♪ X♩ | – / B X X X A / B X X X X X A | Small, very fast ball: if it touches someone, caster and target trade places, and the target is dazed (knocked out, stars over its head) for 1.5 / 2.5 / 3.5 beats. Range 6 / 10 / 14. |
+| Minion | B♩ Y♩ | – / B X B Y A / B X B Y B Y A | Necromancy: shadowy doubles of the caster climb out of the ground in front, chase the nearest enemy and shove. Level 2: 2 small ones; level 3: 3 bigger, stronger, quicker ones wreathed in sparks. They crumble after 16 beats. No limit on how many. |
 
 Durations, distances and forces are also scaled by precision (55–100%).
 
@@ -79,7 +92,7 @@ again.
   `SpellDefinition` resources). Reorder the spells to change which one owns level 1.
 - Per-level numbers: `_lv(...)` calls in `scripts/spells/spell_effects.gd`, plus its
   exported base values (group "Book spells").
-- Tolerance and the precision-to-power range: `timing_tolerance`, `power_range` on
+- Timing window and the precision-to-power range: `timing_window`, `power_range` on
   `scripts/spells/spell_caster.gd`.
 
 ## More ideas

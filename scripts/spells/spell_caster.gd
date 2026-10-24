@@ -29,10 +29,10 @@ const SYLLABLE_SOUNDS: Array[AudioStream] = [
 const FIZZLE_SOUND := preload("res://assets/audio/fizzle.wav")
 
 @export var book: SpellBook
-## Per-note timing tolerance, as a fraction of the note (the original Synchre's is 0.2).
-## Wide, to forgive mistakes; precision then scales the spell's power instead
-## (see `power_range`).
-@export var timing_tolerance := 0.4
+## Timing window of every note, either side, in beats (0.2 = 120 ms at 100 BPM), the same
+## whatever the note's length (the original Synchre used 20% of each note's own length).
+## Generous, to forgive mistakes; precision then scales the spell's power (`power_range`).
+@export var timing_window := 0.2
 ## Power multiplier of a cast at precision 0 and 1.
 @export var power_range := Vector2(0.55, 1.0)
 ## Metronome clicks once the tempo is locked (the original's behavior).
@@ -62,7 +62,7 @@ var _press_real := 0.0
 
 func _ready() -> void:
 	engine = RhythmEngine.new(book.patterns())
-	engine.tolerance = timing_tolerance
+	engine.tolerance_beats = timing_window
 	engine.note_judged.connect(_on_judged)
 	engine.progress_changed.connect(_on_progress)
 	engine.incantation_failed.connect(_on_failed)

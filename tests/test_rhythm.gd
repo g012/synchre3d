@@ -575,54 +575,67 @@ func test_spellbook() -> void:
 	var push: SpellDefinition = book.find(&"push")
 	check(push.button_string(1) == "A A Y" and push.button_string(2) == "A A B X Y" and push.button_string(3) == "A A B X B X Y",
 		"push levels: start + end, then the middle once, twice (%s / %s / %s)" % [push.button_string(1), push.button_string(2), push.button_string(3)])
+	# Written as note lengths: A croche, A noire, [B croche, X noire] per level, Y.
+	var onsets := []
+	for level in [1, 2, 3]:
+		var p := push.to_pattern(level)
+		var o := []
+		for k in p.size():
+			o.append(p.onset(k) - p.onset(0))
+		onsets.append(o)
+	check(onsets == [[0.0, 0.5, 1.5], [0.0, 0.5, 1.5, 2.0, 3.0], [0.0, 0.5, 1.5, 2.0, 3.0, 3.5, 4.5]],
+		"push rhythm: middles inserted as B croche X noire (%s)" % [onsets])
 	var families := {}
 	for sp in book.spells:
 		families[sp.family] = true
 		check(sp.syllables(2).size() == sp.beats(2).size(), "%s: one gap per note" % sp.id)
 	check(families.size() == 4, "4 families (%d)" % families.size())
 	# Every chant of the whole book (ideas enabled too, every level) is castable, at the
-	# original tolerance and the game's, and is never mistaken for another one.
+	# original proportional tolerance and with the game's single window, and is never
+	# mistaken for another one.
 	var all := _whole_book()
-	for tol in [RhythmEngine.TOLERANCE, 0.4]:
+	for window in [0.0, 0.2]:
 		var bad := []
 		for i in all.size():
 			var e := make_engine(all)
-			e.tolerance = tol
+			e.tolerance_beats = window
 			e.set_fixed_tempo(100.0, 0.0)
 			_log.clear()
 			play(e, all[i], 10.0, 0.6)
 			var matches := _log.filter(func(l: String): return l.begins_with("match"))
 			if not (matches.size() == 1 and matches[0].begins_with("match %s @" % all[i].pattern_name)):
 				bad.append([all[i].pattern_name, matches])
-		check(bad.is_empty(), "all %d chants recognized alone at tolerance %s: %s" % [all.size(), tol, bad])
+		check(bad.is_empty(), "all %d chants recognized alone (window %s): %s" % [all.size(), window, bad])
 
 
 func test_precision() -> void:
-	var e := make_engine()
-	e.tolerance = 0.4
+	var book: SpellBook = load("res://assets/spells/spellbook.tres")
+	var p: RhythmPattern = book.find(&"push").to_pattern(2)
+	var e := make_engine([p] as Array[RhythmPattern])
+	e.tolerance_beats = 0.2
 	e.set_fixed_tempo(100.0, 0.0)
-	var p: RhythmPattern = e.patterns[0]
 	play(e, p, 10.0, 0.6)
-	check(has("match push") and e.last_precision > 0.99, "dead-on chant: precision 1 (%s)" % e.last_precision)
-	# Every inner note off by half its tolerance, alternating early/late.
+	check(has("match push_2") and e.last_precision > 0.99, "dead-on chant: precision 1 (%s)" % e.last_precision)
+	# Every inner note off by half the window, alternating early/late (last one early).
 	var offs := {}
 	for k in range(1, p.size()):
-		offs[k] = (-0.5 if k % 2 == 0 else 0.5) * 0.4 * p.beats[k] * 0.6
+		offs[k] = (-0.5 if (p.size() - 1 - k) % 2 == 0 else 0.5) * 0.2 * 0.6
 	_log.clear()
 	play(e, p, 20.0, 0.6, offs)
-	check(has("match push"), "sloppy chant (half the tolerance off) still casts")
+	check(has("match push_2"), "sloppy chant (half the window off) still casts")
 	check(e.last_precision > 0.3 and e.last_precision < 0.75, "sloppy chant: lower precision (%s)" % e.last_precision)
-	# The wider game tolerance accepts what the original rejects.
-	var strict := make_engine()
+	# One window for every note: a croche a quarter beat late is fine in the game, while the
+	# original (20% of each note's own length: 0.1 beat for a croche) rejects it.
+	offs = {3: 0.25 * 0.6}
+	var strict := make_engine([p] as Array[RhythmPattern])
 	strict.set_fixed_tempo(100.0, 0.0)
-	offs = {2: 0.6 * p.beats[2] * 0.6}
 	play(strict, p, 10.0, 0.6, offs)
-	check(not has("match"), "a note 60% of its length off fails at the original tolerance")
-	var loose := make_engine()
-	loose.tolerance = 0.4
-	loose.set_fixed_tempo(100.0, 0.0)
-	play(loose, p, 10.0, 0.6, offs)
-	check(has("match push"), "and casts at the game tolerance")
+	check(not has("match"), "a croche 1/4 beat late fails at the original proportional tolerance")
+	var game := make_engine([p] as Array[RhythmPattern])
+	game.tolerance_beats = 0.2
+	game.set_fixed_tempo(100.0, 0.0)
+	play(game, p, 10.0, 0.6, offs)
+	check(has("match push_2"), "and casts with the game's single 0.2-beat window")
 
 
 # ------------------------------------------------------------------------------ tempo slides
@@ -733,18 +746,20 @@ func test_shared_openings_progress() -> void:
 	check(fails.size() == 1, "X X (no such spell) fizzles once: %s" % [_log])
 
 
-## After the Hex start (B X), Swap expects its middle half a beat later, Knockout a full beat
-## later: waiting past Swap's deadline must only drop Swap, and Knockout still casts.
+## After the Time start and a shared X (Y B X), Quicken expects its next X half a beat later,
+## Snare its B a full beat later: waiting past Quicken's deadline must only drop Quicken,
+## and Snare still casts.
 func test_shared_opening_timeout_waits_for_slowest() -> void:
 	var e := make_engine(_whole_book())
+	e.tolerance_beats = 0.2
 	e.set_fixed_tempo(100.0, 0.0)
-	var ko := _pattern(e, "knockout_2")
+	var snare := _pattern(e, "snare_2")
 	var m := 10.0
-	e.press(B, m)
-	e.press(X, m + 0.5 * 0.6)
-	e.advance(m + 1.4 * 0.6)
+	for k in 3:
+		e.press(snare.syllables[k], m + (snare.onset(k) - snare.onset(0)) * 0.6)
+	e.advance(m + 2.45 * 0.6)
 	var names := _names(e.candidate_patterns())
-	check(not has("fail") and not "swap_ball_2" in names and "knockout_2" in names, "swap dropped silently once late: %s %s" % [_log, names])
-	for k in range(2, ko.size()):
-		e.press(ko.syllables[k], m + (ko.onset(k) - ko.onset(0)) * 0.6)
-	check(has("match knockout_2") and not has("fail"), "knockout cast without a fizzle: %s" % [_log])
+	check(not has("fail") and not "quicken_2" in names and "snare_2" in names, "quicken dropped silently once late: %s %s" % [_log, names])
+	for k in range(3, snare.size()):
+		e.press(snare.syllables[k], m + (snare.onset(k) - snare.onset(0)) * 0.6)
+	check(has("match snare_2") and not has("fail"), "snare cast without a fizzle: %s" % [_log])
