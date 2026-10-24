@@ -39,7 +39,9 @@ The game opens on a **menu** (stick / D-pad / arrows to choose, A / Enter / Star
   The dummies come back when knocked away or into a hole, and so do you.
 - **Duel vs CPU** and **Duel vs human**: the island duels described below.
 
-**Start / Back / Esc** pauses: resume, restart (a new survival run, or the duel from 0 - 0
+**Start / Back / Esc** pauses: resume, open the **spell book** (every spell in play with its
+three chants drawn to rhythm, chords boxed, and what it does; D-pad left / right turns
+pages if needed, B closes it), restart (a new survival run, or the duel from 0 - 0
 at the same tempo) or quit to the menu. Leaving the window (alt-tab) pauses too. Every mode
 starts with player 1 tapping the tempo while everyone stands still; the moment it locks, the
 fight (or run) is on.

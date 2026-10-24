@@ -43,6 +43,8 @@ const CHORDS: Array[int] = [3, 10, 12, 5, 7, 11, 14, 13]
 @export var enabled := true
 ## What the spell does, for the book.
 @export_multiline var description := ""
+## One line for the in-game spell book (pause menu).
+@export var summary := ""
 
 
 ## Main button of each note of the chant at `level` (a chord's own syllable).

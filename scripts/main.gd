@@ -28,7 +28,7 @@ enum Phase { MENU, TEMPO, INTRO, FIGHT, ROUND_OVER, RUN, GAME_OVER, LESSON }
 
 const MENU_ITEMS: Array[String] = ["SINGLE PLAYER - SURVIVAL", "TUTORIAL - LEARN THE SPELLS", "DUEL VS CPU", "DUEL VS HUMAN"]
 const MENU_MODES: Array[Mode] = [Mode.SURVIVAL, Mode.TUTORIAL, Mode.DUEL_CPU, Mode.DUEL_HUMAN]
-const PAUSE_ITEMS: Array[String] = ["RESUME", "RESTART", "QUIT TO MENU"]
+const PAUSE_ITEMS: Array[String] = ["RESUME", "SPELL BOOK", "RESTART", "QUIT TO MENU"]
 ## Survival: Pip's health.
 const SURVIVAL_HP := 100.0
 
@@ -512,6 +512,18 @@ func _process(_delta: float) -> void:
 			_show_menu()
 		if _menu_accept(true):
 			_start_mode(MENU_MODES[_menu_index])
+	elif paused and hud.spell_book_open():
+		# Spell book page: left / right turn pages; B (A too) back to the pause menu.
+		for a in ["ui_left", "p1_left", "p2_left"]:
+			if Input.is_action_just_pressed(a):
+				hud.turn_spell_book(-1)
+		for a in ["ui_right", "p1_right", "p2_right"]:
+			if Input.is_action_just_pressed(a):
+				hud.turn_spell_book(1)
+		for a in ["ui_cancel", "p1_syl_b", "p2_syl_b", "ui_accept", "p1_syl_a", "p2_syl_a"]:
+			if Input.is_action_just_pressed(a):
+				_close_spell_book()
+				break
 	elif paused:
 		var moved := _menu_move()
 		if moved != 0:
@@ -521,8 +533,9 @@ func _process(_delta: float) -> void:
 		if _menu_accept(false):
 			match _pause_index:
 				0: _set_paused(false)
-				1: _restart()
-				2: enter_menu()
+				1: _open_spell_book()
+				2: _restart()
+				3: enter_menu()
 
 
 func _menu_move() -> int:
@@ -555,6 +568,7 @@ func _set_paused(on: bool) -> void:
 		_show_pause()
 	else:
 		hud.hide_menu()
+		hud.show_spell_book(null)
 		# A chant can't survive a pause (the beat went on meanwhile).
 		for c in casters:
 			if c:
@@ -563,6 +577,16 @@ func _set_paused(on: bool) -> void:
 
 func _show_pause() -> void:
 	hud.show_menu("PAUSED", PAUSE_ITEMS, _pause_index, "STICK / D-PAD: CHOOSE    A / ENTER: SELECT\nSTART / BACK / ESC: RESUME")
+
+
+func _open_spell_book() -> void:
+	hud.hide_menu()
+	hud.show_spell_book(SPELLBOOK)
+
+
+func _close_spell_book() -> void:
+	hud.show_spell_book(null)
+	_show_pause()
 
 
 ## Pause menu "restart": a new survival run, or the duel from 0 - 0 (same tempo).
@@ -644,7 +668,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	if back or start:
 		if mode == Mode.MENU:
 			return
-		if paused:
+		if paused and hud.spell_book_open():
+			_close_spell_book()
+		elif paused:
 			_set_paused(false)
 		elif mode == Mode.SURVIVAL and phase == Phase.GAME_OVER:
 			if start:

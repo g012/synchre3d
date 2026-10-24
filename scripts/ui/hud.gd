@@ -27,6 +27,7 @@ var sheets_visible := true
 var _menu_title: Label
 var _menu_items: Array[Label] = []
 var _tutorial_card: TutorialCard
+var _spell_book: SpellBookView
 var _menu_footer: Label
 
 
@@ -131,6 +132,9 @@ func _layout() -> void:
 	_sub.size = Vector2(s.x, 10)
 	_sub.position = Vector2(0, _message_base_y + 32)
 	_hint.position = Vector2(6, s.y - 14)
+	if _spell_book:
+		_spell_book.position = Vector2(8, 8)
+		_spell_book.size = s - Vector2(16, 16)
 	if _tutorial_card:
 		_tutorial_card.position = Vector2(floorf((s.x - _tutorial_card.size.x) * 0.5), 6)
 	if _menu:
@@ -176,6 +180,31 @@ func set_mode(mode: String) -> void:
 		"survival":
 			_mode.text = "SURVIVAL"
 			_hint.text = "STICK/WASD MOVE  ABXY (KLJI) CHANT  RT/SPC JUMP  LB/SHIFT DASH  RB/E SHOVE  LT/Q STRAFE  START PAUSE"
+
+
+## Shows the spell book page (pause menu), or hides it with null.
+func show_spell_book(book: SpellBook) -> void:
+	if not book:
+		if _spell_book:
+			_spell_book.queue_free()
+			_spell_book = null
+		return
+	if not _spell_book:
+		_spell_book = SpellBookView.new()
+		_spell_book.setup(book, _font, _palette)
+		_root.add_child(_spell_book)
+	_layout()
+	_spell_book.queue_redraw()
+
+
+func spell_book_open() -> bool:
+	return _spell_book != null
+
+
+func turn_spell_book(step: int) -> void:
+	if _spell_book:
+		_spell_book.page = posmod(_spell_book.page + step, _spell_book.page_count())
+		_spell_book.queue_redraw()
 
 
 ## Shows the tutorial's lesson card (null hides it).

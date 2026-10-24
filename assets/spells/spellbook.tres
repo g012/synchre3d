@@ -21,6 +21,7 @@ family = SubResource("force")
 middle = PackedInt32Array(1, 2)
 middle_lengths = PackedFloat32Array(0.5, 1)
 chords = PackedInt32Array(0, 12)
+summary = "BEAM AHEAD. LV2+: GROUND PARTS ON BOTH SIDES"
 description = "Throws a ball of light that shoves the first enemy it touches. Bigger, faster and harder at each level; level 2 shoves about twice as far as the RB shove."
 
 [sub_resource type="Resource" id="shockwave"]
@@ -33,6 +34,7 @@ middle_lengths = PackedFloat32Array(1, 1)
 chords = PackedInt32Array(0, 5)
 effect = 6
 palette_index = 4
+summary = "BLAST AROUND YOU, PUSHES EVERYONE AWAY"
 description = "A blast all around the caster pushes every enemy away (stronger up close). Wider and stronger at each level."
 
 [sub_resource type="Resource" id="earth"]
@@ -55,6 +57,7 @@ chords = PackedInt32Array(0, 12)
 effect = 1
 palette_index = 11
 enabled = false
+summary = "DIG: MOUNTAIN > HILL > BUMP > FLAT > PIT"
 description = "Digs in front: a mountain sinks to a hill, a hill to a bump, a bump to flat ground, and flat ground opens into a pit (wider at each level; level 3 digs two steps at once)."
 
 [sub_resource type="Resource" id="close_hole"]
@@ -68,6 +71,7 @@ chords = PackedInt32Array(0, 3)
 effect = 2
 palette_index = 28
 enabled = false
+summary = "CLOSE A HOLE AHEAD, OR RAISE THE GROUND"
 description = "Closes a hole in a cone in front; with none, raises the ground ahead: bump, then hill, then mountain (level 3 raises two steps at once), shoving whoever stands there."
 
 [sub_resource type="Resource" id="time"]
@@ -90,6 +94,7 @@ chords = PackedInt32Array(0, 5)
 effect = 3
 palette_index = 7
 enabled = false
+summary = "TEMPO SLIDES UP (+10/+20/+30 BPM)"
 description = "Tempo change: the shared tempo slides up over one bar (+10 / +20 / +30 BPM by level, max 160), so a chant almost finished still lands."
 
 [sub_resource type="Resource" id="slow"]
@@ -103,6 +108,7 @@ chords = PackedInt32Array(0, 10)
 effect = 4
 palette_index = 14
 enabled = false
+summary = "TEMPO SLIDES DOWN (-10/-20/-30 BPM)"
 description = "Tempo change: the shared tempo slides down over one bar (-10 / -20 / -30 BPM by level, min 80)."
 
 [sub_resource type="Resource" id="quicken"]
@@ -115,6 +121,7 @@ middle_lengths = PackedFloat32Array(0.5, 1)
 chords = PackedInt32Array(0, 12)
 effect = 9
 palette_index = 22
+summary = "RUN FASTER FOR A WHILE"
 description = "The caster runs faster for a while (x1.27 / x1.45 / x1.63 for 4 / 8 / 12 beats by level)."
 
 [sub_resource type="Resource" id="snare"]
@@ -128,6 +135,7 @@ chords = PackedInt32Array(0, 3)
 effect = 10
 palette_index = 31
 enabled = false
+summary = "SLOW BLOB: TARGET MOVES SLOWLY"
 description = "Throws a slow, heavy blob: whoever it hits is slowed down (to 65% / 50% / 38% speed for about 3.6 / 6 / 8.4 beats by level)."
 
 [sub_resource type="Resource" id="hex"]
@@ -150,6 +158,7 @@ chords = PackedInt32Array(10)
 effect = 8
 palette_index = 6
 enabled = false
+summary = "SPINNING STAR: TARGET KNOCKED OUT"
 description = "Throws a spinning star: whoever it hits is knocked out (2 / 4 / 6 beats by level): can't move, but can be pushed."
 
 [sub_resource type="Resource" id="swap_ball"]
@@ -162,6 +171,7 @@ middle_lengths = PackedFloat32Array(0.5, 1)
 chords = PackedInt32Array(0, 5)
 effect = 7
 palette_index = 12
+summary = "FAST BALL: TRADE PLACES (FLOWERS TOO)"
 description = "Throws a small, very fast ball (longer range at each level): if it touches someone, caster and target swap places."
 
 [sub_resource type="Resource" id="raise_minion"]
@@ -174,6 +184,7 @@ middle_lengths = PackedFloat32Array(1, 1)
 chords = PackedInt32Array(0, 11)
 effect = 5
 palette_index = 13
+summary = "RAISE MINIONS: 2 AT LV2, 3 ELITES AT LV3"
 description = "Necromancy: a small undead double climbs out of the ground in front and shoves enemies softly. Crumbles after 8 / 16 / 24 beats by level; no limit but chanting speed."
 
 [resource]
